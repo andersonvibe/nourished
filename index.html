@@ -1458,7 +1458,7 @@ async function readReceipt() {
   const known = productList().slice(0, 200).map(p => `${p.id}: ${p.name}`).join('\n') || '(none yet)';
   const prompt = `You are reading a UK supermarket ${rin === 'photo' ? 'receipt photo' : 'online grocery order'} for a food tracker. Extract every purchased item.
 Reply with ONLY this JSON:
-{"store": string or null, "date": "YYYY-MM-DD" or null, "items": [{"name": "readable product name, expand receipt abbreviations, e.g. Tesco Wholewheat Fusilli", "receiptText": "the line as printed", "qty": number, "price": number (total £ paid for this line after any discount on that item), "grams": number or null (weight of ONE pack in grams; treat ml as grams; null if unknown), "matchId": "an id from the known products list if it is clearly the same product, else null"}]}
+{"store": string or null, "date": "YYYY-MM-DD" or null, "items": [{"name": "readable product name, expand receipt abbreviations, e.g. Tesco Wholewheat Fusilli", "generic": "plain ingredient name in lower case with no brand, shop or pack details, e.g. 'semi-skimmed milk', 'walnuts', 'bananas'; null if it isn't food or drink", "receiptText": "the line as printed", "qty": number, "price": number (total £ paid for this line after any discount on that item), "grams": number or null (weight of ONE pack in grams; treat ml as grams; null if unknown), "matchId": "an id from the known products list if it is clearly the same product, else null"}]}
 Skip bags, totals, subtotals, payment, change, VAT, loyalty summaries and coupons for the whole shop. Apply item-level discounts or multibuy savings to the item they belong to.
 Known products (id: name):
 ${known}` + (rin === 'text' ? `\n\nOrder text:\n${text.slice(0, 20000)}` : '');
@@ -1475,7 +1475,7 @@ ${known}` + (rin === 'text' ? `\n\nOrder text:\n${text.slice(0, 20000)}` : '');
           const hit = Object.values(S.products).find(p => norm(p.name) === n2 || (p.aliases || []).some(a => norm(a) === n1));
           if (hit) match = hit.id;
         }
-        return { on: true, name: String(it.name || it.receiptText || 'Item'), receiptText: String(it.receiptText || ''), qty: Math.max(1, num(it.qty) || 1), price: numN(it.price), grams: numN(it.grams), matchId: match };
+        return { on: true, generic: it.generic ? String(it.generic).toLowerCase() : null, name: String(it.name || it.receiptText || 'Item'), receiptText: String(it.receiptText || ''), qty: Math.max(1, num(it.qty) || 1), price: numN(it.price), grams: numN(it.grams), matchId: match };
       })
     };
     done();
@@ -1525,7 +1525,7 @@ async function saveReceipt() {
       if (it.receiptText && !(p.aliases || []).includes(it.receiptText)) p.aliases = [...(p.aliases || []), it.receiptText].slice(-6);
     } else {
       added++;
-      p = { id: newId(), name, grams, price: unit != null ? Math.round(unit * 100) / 100 : null, store, per100: null, aliases: it.receiptText ? [it.receiptText] : [], createdAt: Date.now() };
+      p = { id: newId(), name, generic: it.generic || null, grams, price: unit != null ? Math.round(unit * 100) / 100 : null, store, per100: null, aliases: it.receiptText ? [it.receiptText] : [], createdAt: Date.now() };
     }
     if (unit != null) p.history = [...(p.history || []), { price: Math.round(unit * 100) / 100, store, date }].slice(-12);
     p.lastBought = date;
@@ -1797,6 +1797,38 @@ async function askWithSearch(prompt) {
   }
   throw { code: 'api', message: "the recipe sites couldn't be searched. Try again later." };
 }
+// "Add my recent shopping": plain ingredient names ("milk", "walnuts"), not brands and pack sizes
+async function plainNames(products) {
+  const need = products.filter(p => p.generic === undefined || p.generic === '');
+  if (need.length && apiKeyOk()) {
+    const prompt = `Turn these UK supermarket product names into plain ingredient names a cook would use: lower case, no brand, shop, range or pack details (e.g. "Arla Cravendale Semi-Skimmed Milk 2L" -> "semi-skimmed milk", "Morrisons Walnut Halves 100g" -> "walnuts", "Amazon Bananas" -> "bananas"). Use null for anything that isn't food or drink.
+Products (id: name):
+${need.map(p => p.id + ': ' + p.name).join('\n')}
+Reply with ONLY a JSON object mapping each id to its plain name or null.`;
+    try {
+      const map = await ask(prompt);
+      for (const p of need) if (map && Object.prototype.hasOwnProperty.call(map, p.id)) await put('products', { ...clone(S.products[p.id]), generic: map[p.id] ? String(map[p.id]).toLowerCase().trim() : null });
+    } catch (e) { /* fall back to a simple tidy below */ }
+  }
+  return products.map(p => { const q = S.products[p.id] || p; return q.generic === null ? null : (q.generic || roughName(q.name)); }).filter(Boolean);
+}
+// offline fallback: strip shop names, brands we know, and pack sizes
+function roughName(n) {
+  return String(n).replace(/\b(by amazon|amazon|asda|tesco|sainsbury'?s|morrisons?'?s?|aldi|lidl|waitrose|co-?op|m&s|marks (and|&) spencer|iceland|ocado|essential|finest|extra special|taste the difference|the best|arla|cravendale|bertolli|naturalis[eé])\b/gi, '')
+    .replace(/\b\d+(\.\d+)?\s?(g|kg|ml|l|x|pack|pk)\b/gi, '').replace(/\s{2,}/g, ' ').trim().toLowerCase();
+}
+function apiKeyOk() { return typeof apiKey === 'function' ? !!apiKey() : !!sample; }
+async function addRecentShopping(btn) {
+  const recent = productList().sort((x, y) => String(y.lastBought || '').localeCompare(String(x.lastBought || ''))).slice(0, 30);
+  if (!recent.length) return toast('Scan a receipt first and your shopping will appear here.');
+  const old = btn.textContent; btn.disabled = true; btn.textContent = 'Tidying names…';
+  try {
+    const names = Array.from(new Set(await plainNames(recent)));
+    const box = $('#h-have'), cur = box.value.split(',').map(x => x.trim()).filter(Boolean);
+    box.value = Array.from(new Set(cur.concat(names))).join(', ');
+  } finally { btn.disabled = false; btn.textContent = old; }
+}
+
 async function findHave() {
   const btn = $('#h-go'), st = $('#h-status');
   const have = $('#h-have').value.trim(), staples = $('#h-staples').value.trim();
@@ -2120,12 +2152,7 @@ document.addEventListener('click', async e => {
   if (a === 'bclabel') { setScan('label'); toast('Photograph the nutrition table. The app will link it to this barcode.'); return; }
   if (a === 'install') return doInstall();
   if (a === 'loghave') return logHave(+t.dataset.i);
-  if (a === 'havepantry') {
-    const names = productList().sort((x, y) => String(y.lastBought || '').localeCompare(String(x.lastBought || ''))).slice(0, 25).map(p => p.name);
-    if (!names.length) return toast('Scan a receipt first and your shopping will appear here.');
-    const cur = $('#h-have').value.trim(); $('#h-have').value = (cur ? cur + ', ' : '') + names.join(', ');
-    return;
-  }
+  if (a === 'havepantry') return addRecentShopping(t);
   if (a === 'addex') return addExercise();
   if (a === 'delex') { await remove('exercise', t.dataset.id); toast('Exercise deleted.'); return renderAll(); }
   if (a === 'delweight') { await remove('weights', t.dataset.id); toast('Weigh-in deleted.'); return renderAll(); }
