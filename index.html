@@ -1774,7 +1774,29 @@ function recipeLink(r) {
   const q = [r.title, r.source && r.source !== 'Classic dish' ? r.source : '', 'recipe'].filter(Boolean).join(' ');
   return 'https://www.google.com/search?q=' + encodeURIComponent(q);
 }
-const RECIPE_SITES = ['bbcgoodfood.com', 'allrecipes.com', 'deliciousmagazine.co.uk', 'olivemagazine.com', 'waitrose.com', 'realfood.tesco.com', 'sainsburysmagazine.co.uk', 'jamieoliver.com', 'bbc.co.uk', 'greatbritishchefs.com', 'goodhousekeeping.com', 'theguardian.com', 'food.com', 'budgetbytes.com', 'cookieandkate.com', 'loveandlemons.com', 'recipetineats.com', 'simplyrecipes.com', 'seriouseats.com', 'nigella.com'];
+// Sites that block Claude's web search are left out; any others found blocked are remembered on this phone and skipped.
+const RECIPE_SITES = ['deliciousmagazine.co.uk', 'olivemagazine.com', 'waitrose.com', 'realfood.tesco.com', 'sainsburysmagazine.co.uk', 'jamieoliver.com', 'greatbritishchefs.com', 'food.com', 'budgetbytes.com', 'cookieandkate.com', 'loveandlemons.com', 'recipetineats.com', 'nigella.com', 'minimalistbaker.com', 'eatingwell.com', 'veganricha.com', 'rainbowplantlife.com', 'hungryhealthyhappy.com', 'thehappyfoodie.co.uk', 'bosh.tv'];
+const BLOCKED_LS = 'nourished-blocked-sites';
+function blockedSites() { try { return JSON.parse(localStorage.getItem(BLOCKED_LS) || '[]'); } catch (e) { return []; } }
+function recipeSites() { const b = blockedSites(); return RECIPE_SITES.filter(d => !b.includes(d)); }
+function searchTool() {
+  const t = { type: 'web_search_20250305', name: 'web_search', max_uses: 5, user_location: { type: 'approximate', country: 'GB', timezone: 'Europe/London' } };
+  const sites = recipeSites(); if (sites.length) t.allowed_domains = sites;
+  return t;
+}
+// ask with live web search; if the API says some sites refuse the search, drop them and try again
+async function askWithSearch(prompt) {
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try { return await ask(prompt, null, { maxTokens: 10000, tools: [searchTool()] }); }
+    catch (e) {
+      const m = e && e.code === 'api' && /not accessible/i.test(e.message || '') ? (e.message.match(/'([a-z0-9.-]+\.[a-z]{2,})'/gi) || []).map(x => x.replace(/'/g, '').toLowerCase()) : [];
+      if (!m.length) throw e;
+      const b = Array.from(new Set(blockedSites().concat(m)));
+      try { localStorage.setItem(BLOCKED_LS, JSON.stringify(b)); } catch (er) {}
+    }
+  }
+  throw { code: 'api', message: "the recipe sites couldn't be searched. Try again later." };
+}
 async function findHave() {
   const btn = $('#h-go'), st = $('#h-status');
   const have = $('#h-have').value.trim(), staples = $('#h-staples').value.trim();
@@ -1795,7 +1817,7 @@ Your final message must be ONLY a JSON array:
 [{"title": exact recipe title, "url": page URL from the search results, "source": site name, "author": string or null, "rating": number or null, "reviews": number or null, "dish": "Pasta" | "Bake" | "Soup" | "Curry" | "Salad" | "Stew" | "Stir-fry" | etc, "stretch": boolean, "mins": n, "serves": n, "summary": "one sentence on the dish", "uses": [what they have that it uses], "staples": [cupboard staples it needs], "buy": [extra items, only for stretch], "kcal": n, "protein": n, "carbs": n, "fat": n, "sat": n, "sugars": n, "fibre": n, "salt": n, "light": % of calories from light foods (under 1 kcal/g), "moderate": %, "dense": % (over 2.4 kcal/g), "verdict": "one short sentence on how it fits their goals", "boosts": [{"text": string, "kcal": n, "protein": n, "fibre": n, "density": "light" | "moderate" | "dense"}]}]`;
   const done = busy(btn, st, 'Searching recipe sites…', 'Searching the web for well-rated recipes. This usually takes 30–90 seconds.');
   try {
-    const res = await ask(prompt, null, { maxTokens: 10000, tools: [{ type: 'web_search_20250305', name: 'web_search', max_uses: 5, allowed_domains: RECIPE_SITES, user_location: { type: 'approximate', country: 'GB', timezone: 'Europe/London' } }] });
+    const res = await askWithSearch(prompt);
     if (!Array.isArray(res) || !res.length) throw { code: 'empty_completion' };
     haveRes = res.slice(0, 5).map(r => {
       const url = /^https:\/\//.test(r.url || '') ? r.url : '';
