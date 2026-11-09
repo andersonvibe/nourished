@@ -1,6 +1,6 @@
 // Nourished service worker: makes the app open offline and load fast.
 // Bump VERSION whenever you upload a new index.html so phones pick it up.
-const VERSION = 'nourished-v3';
+const VERSION = 'nourished-v4';
 const SHELL = ['./', './index.html', './manifest.webmanifest', './icon-192.png', './icon-512.png', './icon-maskable-512.png'];
 
 self.addEventListener('install', e => {
@@ -15,7 +15,8 @@ self.addEventListener('fetch', e => {
   const url = new URL(req.url);
   // the app itself: try the network first so updates arrive, fall back to the saved copy offline
   if (url.origin === self.location.origin) {
-    e.respondWith(fetch(req).then(res => {
+    // cache: 'no-cache' asks GitHub every time, so a new upload shows up straight away instead of after its 10-minute cache
+    e.respondWith(fetch(req, { cache: 'no-cache' }).then(res => {
       if (res.ok) { const copy = res.clone(); caches.open(VERSION).then(c => c.put(req, copy)); }
       return res;
     }).catch(() => caches.match(req).then(r => r || caches.match('./index.html'))));

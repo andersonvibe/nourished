@@ -538,7 +538,7 @@ a.btn{text-decoration:none}
     <!-- PROGRESS -->
     <section id="v-progress" class="stack" hidden></section>
   </main>
-  <p class="disclaim">Estimates only. Not medical or dietetic advice.</p>
+  <p class="disclaim">Estimates only. Not medical or dietetic advice. <span class="mono">Version 4</span></p>
 </div>
 
 <nav class="tabs" aria-label="Sections">
@@ -2315,7 +2315,7 @@ let installEvt = null;
 window.addEventListener('beforeinstallprompt', e => { e.preventDefault(); installEvt = e; $('#h-install').hidden = false; });
 window.addEventListener('appinstalled', () => { installEvt = null; $('#h-install').hidden = true; toast('Installed. Open Nourished from your home screen.'); });
 async function doInstall() { if (!installEvt) return; installEvt.prompt(); try { await installEvt.userChoice; } catch (e) {} installEvt = null; $('#h-install').hidden = true; }
-if ('serviceWorker' in navigator && location.protocol === 'https:') navigator.serviceWorker.register('sw.js').catch(() => {});
+if ('serviceWorker' in navigator && location.protocol === 'https:') navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' }).then(r => r.update()).catch(() => {});
 
 /* ---------- boot ---------- */
 setRin('photo'); setMin('plate');
