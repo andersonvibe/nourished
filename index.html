@@ -125,6 +125,17 @@ textarea{min-height:84px;resize:vertical}
 .seg{display:flex;background:var(--sunk);border-radius:12px;padding:4px;gap:4px}
 .seg button{flex:1;border:0;background:transparent;border-radius:9px;padding:9px 6px;font-weight:700;cursor:pointer;color:var(--muted);font-size:.92rem}
 .seg4{display:grid;grid-template-columns:repeat(4,1fr)}
+.seg5{display:grid;grid-template-columns:repeat(5,1fr)}
+@media (max-width:560px){.seg5{grid-template-columns:repeat(6,1fr)}.seg5 button{grid-column:span 2}.seg5 button:nth-child(n+4){grid-column:span 3}}
+.quick{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
+@media (max-width:420px){.quick{grid-template-columns:repeat(2,1fr)}}
+.meal[data-act]{cursor:pointer}
+.meal .items{grid-column:1/-1;font-size:.84rem;color:var(--muted);overflow-wrap:anywhere}
+.ing.rm{grid-template-columns:1fr 78px 38px}
+.ing .x{width:38px;height:38px;border:1px solid var(--line);background:var(--surface);border-radius:10px;cursor:pointer;color:var(--muted);font-size:1.2rem;line-height:1}
+.addbar{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+@media (max-width:380px){.addbar{grid-template-columns:1fr}}
+.addbar .btn[aria-pressed="true"]{background:var(--sunk);border-color:var(--leaf)}
 @media (max-width:480px){.seg4{grid-template-columns:repeat(2,1fr)}}
 .seg button[aria-pressed="true"]{background:var(--surface);color:var(--ink);box-shadow:var(--shadow)}
 .chip{display:inline-flex;align-items:center;gap:5px;font-size:.75rem;font-weight:700;border-radius:99px;padding:3px 9px;white-space:nowrap}
@@ -446,14 +457,16 @@ a.btn{text-decoration:none}
 
       <!-- meal -->
       <div id="p-meal" class="stack" hidden>
-        <div>
+        <div id="m-head">
           <h2>Log a meal</h2>
-          <p class="muted small">Snap your plate, a recipe, or just describe what you ate. Ingredients you've bought are priced from your receipts.</p>
+          <p class="muted small">Snap your plate, a recipe, scan a barcode or just describe what you ate. You can add more food to the meal before you save it, and edit it later from Today.</p>
         </div>
-        <div class="seg seg4" role="group" aria-label="Meal input">
+        <div id="m-inputs" class="stack">
+        <div class="seg seg5" role="group" aria-label="Meal input">
           <button data-min="plate" aria-pressed="true">Plate photo</button>
           <button data-min="recipe" aria-pressed="false">Recipe photo</button>
           <button data-min="text" aria-pressed="false">Describe it</button>
+          <button data-min="barcode" aria-pressed="false">Barcode</button>
           <button data-min="out" aria-pressed="false">Eaten out</button>
         </div>
         <div id="m-photo-wrap" class="stack" style="gap:8px">
@@ -470,6 +483,7 @@ a.btn{text-decoration:none}
         </label>
         <button class="btn block" id="m-go">Estimate nutrition</button>
         <p class="status" id="m-status" hidden></p>
+        </div>
         <div id="m-review" hidden></div>
       </div>
     </section>
@@ -596,7 +610,7 @@ a.btn{text-decoration:none}
     <!-- PROGRESS -->
     <section id="v-progress" class="stack" hidden></section>
   </main>
-  <p class="disclaim">Estimates only. Not medical or dietetic advice. <span class="mono">Version 10</span></p>
+  <p class="disclaim">Estimates only. Not medical or dietetic advice. <span class="mono">Version 11</span></p>
 </div>
 
 <nav class="tabs" aria-label="Sections">
@@ -608,6 +622,13 @@ a.btn{text-decoration:none}
     <button data-tab="progress"><svg viewBox="0 0 24 24"><path d="M4 19h16"/><path d="M5 15l4-4 3 3 7-7"/><path d="M15 7h4v4"/></svg>Progress</button>
   </div>
 </nav>
+
+<div class="scrim" id="msheet" hidden>
+  <div class="sheet stack" role="dialog" aria-modal="true" aria-labelledby="msheet-h">
+    <div class="row"><h2 id="msheet-h" style="flex:1">Add a meal</h2><button class="btn ghost sm" id="msheet-close">Close</button></div>
+    <div id="msheet-body"></div>
+  </div>
+</div>
 
 <div class="scrim" id="sheet" hidden>
   <div class="sheet stack" role="dialog" aria-modal="true" aria-labelledby="sheet-h">
@@ -994,8 +1015,13 @@ function calcMeal(ings, servings, eaten) {
     NUT.forEach(k => t[k] += num(per[k]) * g / 100);
     // energy density is judged as eaten: dry pasta or lentils use their cooked kcal/100g (eaten100)
     const kc = num(per.kcal) * g / 100, ed = num(ing.eaten100) || num(per.kcal);
-    mix[densityOf(ed)] += kc;
-    if (!ing.drink) { mix.w += ed > 0 ? kc / ed * 100 : g; mix.wk += kc; }
+    if (ing.mix) {
+      // a whole earlier meal kept as "portions" carries its own balance
+      ['g', 'y', 'o', 'w', 'wk'].forEach(k => mix[k] += num(ing.mix[k]) * g / 100);
+    } else {
+      mix[densityOf(ed)] += kc;
+      if (!ing.drink) { mix.w += ed > 0 ? kc / ed * 100 : g; mix.wk += kc; }
+    }
     const up = unitPrice(p);
     if (up != null) { cost += up * g; priced++; } else unpriced++;
   }
@@ -1281,28 +1307,37 @@ function renderToday() {
     </div>
   </div>`;
 
-  html += balanceCard(dayTotals(day).mix, t.kcal);
-  html += exerciseCard(day);
-  if (meals.length) {
-    html += `<div class="card"><h3 style="margin-bottom:6px">Meals</h3><div>${meals.map(m => `
-      <div class="meal">
+  html += `<div class="card stack" id="meals-card">
+    <div class="row" style="justify-content:space-between"><h3>Meals</h3>${meals.length ? `<span class="mono small">${r0(t.kcal)} kcal</span>` : ''}</div>
+    ${meals.length ? `<div>${meals.map(m => {
+      const ings = m.ingredients || [];
+      return `<div class="meal" data-act="editmeal" data-id="${esc(m.id)}" role="button" tabindex="0" aria-label="Edit ${esc(m.name)}">
         <span class="nm">${esc(m.name)}</span><span class="kc">${r0(num(m.nut && m.nut.kcal))} kcal</span>
+        ${ings.length > 1 ? `<span class="items">${esc(ings.map(g => g.name).join(', '))}</span>` : ''}
         <div class="sub"><span>${esc(m.type || '')}</span>${mixDots(mealMix(m))}${m.source === 'out' ? `<span class="chip a">Eaten out${m.venue ? ' · ' + esc(m.venue) : ''}</span>` : ''}
           <span class="mono">${m.cost ? gbp(m.cost) : 'no price'}${m.unpriced ? ' · ' + m.unpriced + ' unpriced' : ''}</span>
           <span class="mono">P ${r0(num(m.nut.protein))}g · C ${r0(num(m.nut.carbs))}g · F ${r0(num(m.nut.fat))}g</span>
+          <button class="linkbtn" data-act="editmeal" data-id="${esc(m.id)}">Edit or add food</button>
           <button class="linkbtn del" data-act="delmeal" data-id="${esc(m.id)}">Delete</button></div>
-      </div>`).join('')}</div></div>`;
-  } else if (!Object.keys(S.products).length && !Object.keys(S.meals).length) {
+      </div>`; }).join('')}</div>` : `<p class="small muted">Nothing logged ${isToday ? 'yet today' : 'on this day'}. Tap a meal once it's logged to change it or add more food to it.</p>`}
+    <p class="small muted" style="margin-bottom:-4px">Add a meal${isToday ? '' : ' for this day'}</p>
+    <div class="quick">
+      <button class="btn ghost sm" data-act="addmeal" data-m="plate">Photo</button>
+      <button class="btn ghost sm" data-act="addmeal" data-m="text">Describe it</button>
+      <button class="btn ghost sm" data-act="addmeal" data-m="barcode">Barcode</button>
+      <button class="btn ghost sm" data-act="addmeal" data-m="out">Eaten out</button>
+    </div></div>`;
+  if (!meals.length && !Object.keys(S.products).length && !Object.keys(S.meals).length) {
     html += `<div class="card stack"><h3>Get started</h3>
       <ol class="steps">
         <li><div><b>Scan a receipt.</b><br><span class="muted small">Your shop and its prices fill the pantry.</span></div></li>
         <li><div><b>Scan nutrition labels.</b><br><span class="muted small">Once per product, so meals use real figures.</span></div></li>
-        <li><div><b>Log a meal.</b><br><span class="muted small">Photo or description. You'll see calories, macros and what it cost.</span></div></li>
+        <li><div><b>Log a meal.</b><br><span class="muted small">Photo, barcode or description. You'll see calories, macros and what it cost.</span></div></li>
       </ol>
       <button class="btn" data-act="go" data-tab="scan">Scan your first receipt</button></div>`;
-  } else {
-    html += `<div class="card row" style="justify-content:space-between"><span class="muted">Nothing logged ${isToday ? 'yet today' : 'on this day'}.</span><button class="btn sm" data-act="logmeal">Log a meal</button></div>`;
   }
+  html += balanceCard(dayTotals(day).mix, t.kcal);
+  html += exerciseCard(day);
 
   // 7-day chart
   const days = Array.from({ length: 7 }, (_, i) => addDays(day, i - 6));
@@ -1591,31 +1626,38 @@ function setScan(mode) {
 /* ---------- SCAN: barcode ---------- */
 let bcStream = null, bcTimer = null, bcRes = null, pendingBarcode = null;
 function bcSay(msg, err) { const st = $('#bc-status'); st.hidden = !msg; st.className = 'status' + (err ? ' err' : ''); st.innerHTML = msg || ''; }
-async function startBarcode() {
-  if (!('BarcodeDetector' in window)) return bcSay("This browser can't read barcodes with the camera. Type the number underneath the barcode instead.", true);
+// One camera scanner, shared by the Barcode page (prefix "bc") and "Add to this meal" (prefix "ma").
+async function startCam(px, onCode, say) {
+  stopBarcode();
+  if (!('BarcodeDetector' in window)) return say("This browser can't read barcodes with the camera. Type the number underneath the barcode instead.", true);
   let det;
-  try { det = new BarcodeDetector({ formats: ['ean_13', 'ean_8', 'upc_a', 'upc_e'] }); } catch (e) { return bcSay("This browser can't read barcodes with the camera. Type the number instead.", true); }
+  try { det = new BarcodeDetector({ formats: ['ean_13', 'ean_8', 'upc_a', 'upc_e'] }); } catch (e) { return say("This browser can't read barcodes with the camera. Type the number instead.", true); }
   try { bcStream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment', width: { ideal: 1280 } }, audio: false }); }
-  catch (e) { return bcSay(e && e.name === 'NotAllowedError' ? "Camera access is blocked. Allow it in Chrome: tap the icon left of the address, then Permissions, then Camera." : "Couldn't start the camera. Type the number instead.", true); }
-  const v = $('#bc-video'); v.srcObject = bcStream; $('#bc-cam').hidden = false; $('#bc-start').hidden = true; $('#bc-stop').hidden = false;
+  catch (e) { return say(e && e.name === 'NotAllowedError' ? "Camera access is blocked. Allow it in Chrome: tap the icon left of the address, then Permissions, then Camera." : "Couldn't start the camera. Type the number instead.", true); }
+  const v = $('#' + px + '-video');
+  if (!v) { stopBarcode(); return; }
+  v.srcObject = bcStream; $('#' + px + '-cam').hidden = false; $('#' + px + '-start').hidden = true; $('#' + px + '-stop').hidden = false;
   try { await v.play(); } catch (e) {}
-  bcSay('Hold the barcode inside the box.');
+  say('Hold the barcode inside the box.');
   const tick = async () => {
-    if (!bcStream) return;
+    if (!bcStream || !v.isConnected) return;
     try {
       const codes = await det.detect(v);
       const c = codes.find(x => /^\d{8,14}$/.test(x.rawValue));
-      if (c) { if (navigator.vibrate) navigator.vibrate(60); stopBarcode(); $('#bc-code').value = c.rawValue; return lookupBarcode(c.rawValue); }
+      if (c) { if (navigator.vibrate) navigator.vibrate(60); stopBarcode(); return onCode(c.rawValue); }
     } catch (e) {}
     bcTimer = setTimeout(tick, 200);
   };
   tick();
 }
+function startBarcode() { return startCam('bc', code => { $('#bc-code').value = code; lookupBarcode(code); }, bcSay); }
 function stopBarcode() {
   clearTimeout(bcTimer); bcTimer = null;
   if (bcStream) { bcStream.getTracks().forEach(t => t.stop()); bcStream = null; }
-  const cam = $('#bc-cam'); if (cam) cam.hidden = true;
-  const a = $('#bc-start'), b = $('#bc-stop'); if (a) a.hidden = false; if (b) b.hidden = true;
+  ['bc', 'ma'].forEach(px => {
+    const cam = $('#' + px + '-cam'); if (cam) cam.hidden = true;
+    const a = $('#' + px + '-start'), b = $('#' + px + '-stop'); if (a) a.hidden = false; if (b) b.hidden = true;
+  });
 }
 function offPer100(n) {
   const g = k => numN(n[k]);
@@ -1623,24 +1665,30 @@ function offPer100(n) {
   let salt = g('salt_100g'); if (salt == null && g('sodium_100g') != null) salt = g('sodium_100g') * 2.5;
   return { kcal: kcal == null ? null : r1(kcal), fat: g('fat_100g'), sat: g('saturated-fat_100g'), carbs: g('carbohydrates_100g'), sugars: g('sugars_100g'), fibre: g('fiber_100g'), protein: g('proteins_100g'), salt: salt == null ? null : r1(salt * 100) / 100 };
 }
+// Pantry first, then Open Food Facts. Returns a product result, {missing, code, p} when there's no nutrition, or throws when offline.
+async function fetchBarcode(code) {
+  const mine = Object.values(S.products).find(p => p.barcode === code && p.per100);
+  if (mine) return { code, name: mine.name, per100: mine.per100, grams: mine.grams, serving: mine.serving || null, productId: mine.id, from: 'pantry' };
+  const r = await fetch(`https://world.openfoodfacts.org/api/v2/product/${code}.json?fields=product_name,product_name_en,brands,quantity,product_quantity,serving_size,serving_quantity,nutriments`);
+  const j = await r.json();
+  const p = j && j.status === 1 && j.product;
+  const per = p && p.nutriments ? offPer100(p.nutriments) : null;
+  if (!p || !per || per.kcal == null) return { missing: true, code, p };
+  const name = [p.brands ? String(p.brands).split(',')[0].trim() : '', p.product_name_en || p.product_name || ''].filter(Boolean).join(' ') || 'Product ' + code;
+  const existing = Object.values(S.products).find(x => x.barcode === code);
+  return { code, name, per100: per, grams: numN(p.product_quantity), serving: numN(p.serving_quantity), servingText: p.serving_size || '', productId: existing ? existing.id : null, from: 'off' };
+}
+const OFFLINE_BC = "You're offline. Connect to look up new products; ones in your pantry work offline.";
 async function lookupBarcode(code) {
   code = String(code || '').replace(/\D/g, '');
   if (code.length < 8) return bcSay('Enter the full number under the barcode (8 to 14 digits).', true);
   $('#bc-out').innerHTML = '';
-  const mine = Object.values(S.products).find(p => p.barcode === code && p.per100);
-  if (mine) { bcRes = { code, name: mine.name, per100: mine.per100, grams: mine.grams, serving: mine.serving || null, productId: mine.id, from: 'pantry' }; bcSay(''); return renderBarcode(); }
-  bcSay('<span class="spin"></span>Looking it up…');
+  if (!Object.values(S.products).some(p => p.barcode === code && p.per100)) bcSay('<span class="spin"></span>Looking it up…');
   try {
-    const r = await fetch(`https://world.openfoodfacts.org/api/v2/product/${code}.json?fields=product_name,product_name_en,brands,quantity,product_quantity,serving_size,serving_quantity,nutriments`);
-    const j = await r.json();
-    const p = j && j.status === 1 && j.product;
-    const per = p && p.nutriments ? offPer100(p.nutriments) : null;
-    if (!p || !per || per.kcal == null) { bcRes = null; pendingBarcode = code; return renderNotFound(code, p); }
-    const name = [p.brands ? String(p.brands).split(',')[0].trim() : '', p.product_name_en || p.product_name || ''].filter(Boolean).join(' ') || 'Product ' + code;
-    const existing = Object.values(S.products).find(x => x.barcode === code);
-    bcRes = { code, name, per100: per, grams: numN(p.product_quantity), serving: numN(p.serving_quantity), servingText: p.serving_size || '', productId: existing ? existing.id : null, from: 'off' };
-    bcSay(''); renderBarcode();
-  } catch (e) { bcSay(navigator.onLine === false ? "You're offline. Connect to look up new products; ones in your pantry work offline." : "Couldn't reach the food database. Try again in a moment.", true); }
+    const res = await fetchBarcode(code);
+    if (res.missing) { bcRes = null; pendingBarcode = code; return renderNotFound(code, res.p); }
+    bcRes = res; bcSay(''); renderBarcode();
+  } catch (e) { bcSay(navigator.onLine === false ? OFFLINE_BC : "Couldn't reach the food database. Try again in a moment.", true); }
 }
 function renderNotFound(code, p) {
   bcSay('');
@@ -1659,7 +1707,7 @@ function renderBarcode() {
       <label class="f">Meal<select id="bc-type">${['Breakfast', 'Lunch', 'Dinner', 'Snack'].map(t => `<option ${t === mealTypeNow() ? 'selected' : ''}>${t}</option>`).join('')}</select></label>
     </div>
     <div class="plain" id="bc-sum"></div>
-    <div class="row"><button class="btn" data-act="bclog">Log it</button>${r.productId ? '' : '<button class="btn ghost" data-act="bcsave">Save to pantry</button>'}</div>
+    <div class="row"><button class="btn" data-act="bclog">Log it</button><button class="btn ghost" data-act="bcmore">Add other food to this meal</button>${r.productId ? '' : '<button class="btn ghost" data-act="bcsave">Save to pantry</button>'}</div>
     <details><summary class="small">Nutrition per 100g</summary>${labelHTML(per, 'Per 100g')}</details>
   </div>`;
   bcSum();
@@ -1672,8 +1720,8 @@ function bcSum() {
     <div class="small mono" style="margin-top:4px">Protein ${r1(num(per.protein) * g / 100)}g · Carbs ${r1(num(per.carbs) * g / 100)}g · Fat ${r1(num(per.fat) * g / 100)}g · Fibre ${r1(num(per.fibre) * g / 100)}g</div>
     <div class="small" style="margin-top:4px;color:${left - kc < 0 ? 'var(--tl-r)' : 'var(--muted)'}">${left - kc < 0 ? `Takes you ${r0(kc - left)} kcal over today` : `${r0(left - kc)} kcal left today after this`}</div>`;
 }
-async function bcSaveProduct() {
-  const r = bcRes; if (!r) return null;
+async function bcSaveProduct(r = bcRes) {
+  if (!r) return null;
   let p = r.productId && S.products[r.productId] ? clone(S.products[r.productId]) : { id: newId(), price: null, store: '', aliases: [], createdAt: Date.now() };
   Object.assign(p, { name: p.name || r.name, barcode: r.code, per100: r.per100, grams: p.grams || r.grams || null, serving: r.serving || p.serving || null });
   await put('products', p); r.productId = p.id; return p;
@@ -1854,14 +1902,60 @@ async function saveLabel() {
 }
 
 /* ---------- SCAN: meal ---------- */
-let mealRes = null;
+let mealRes = null, mealAdd = null, maFound = null;
+// A new estimate joins a meal already being built (e.g. a scanned soup plus a photo of the omelette), otherwise it starts a new one.
+function takeEstimate(x) {
+  const cur = mealRes;
+  if (cur && !cur.editId && cur.ingredients.length && num(cur.servings) === 1 && cur.source !== 'out' && x.source !== 'out' && x.source !== 'recipe') {
+    readMealForm(); cur.ingredients.push(...x.ingredients); mealAdd = null;
+    toast(`Added to your meal: ${x.ingredients.length} item${x.ingredients.length > 1 ? 's' : ''}.`);
+    return;
+  }
+  mealRes = x; mealAdd = null; maFound = null;
+}
+// One ingredient from Claude's JSON, keeping the cooked-weight and drink hints used by the food balance
+function ingFrom(x, fallback) {
+  return { name: String(x.name || fallback), grams: Math.max(0, num(x.grams)), productId: x.productId && S.products[x.productId] ? x.productId : null, per100: Object.fromEntries(NUT.map(k => [k, num(x.per100 && x.per100[k])])), eaten100: num(x.eaten100) || null, drink: x.drink === true };
+}
+function newMealRes(source, ings, name) {
+  return { name: name || '', servings: 1, eaten: 1, confidence: source === 'barcode' ? 'high' : 'medium', note: '', source, ingredients: ings || [], date: S.day, type: mealTypeNow() };
+}
+function clearMealReview() {
+  if (bcStream) stopBarcode();
+  mealRes = null; mealAdd = null; maFound = null;
+  const box = $('#m-review'); box.hidden = true; box.innerHTML = '';
+}
+function autoMealName(ings) {
+  const n = ings.map(g => String(g.name || '').replace(/\s*\(\d+ ?g\)$/, '')).filter(Boolean);
+  return !n.length ? 'Meal' : n.length <= 3 ? n.join(', ') : `${n.slice(0, 2).join(', ')} and ${n.length - 2} more`;
+}
+// A logged meal back into the editor. Meals logged from a plan, recipe or idea have no ingredient list, so they become one "portion" item.
+function mealResFrom(m) {
+  let ings = (m.ingredients || []).map(g => clone(g)), whole = false;
+  if (!ings.length) { whole = true; ings = [{ name: m.name, grams: 100, per100: clone(m.nut || {}), mix: clone(m.mix || { g: 0, y: 0, o: 0 }), portion: true, productId: null }]; }
+  const out = m.source === 'out';
+  return {
+    editId: m.id, createdAt: m.createdAt, date: m.date, type: m.type, name: m.name, servings: whole ? 1 : num(m.servings) || 1, eaten: whole ? 1 : num(m.eaten) || 1,
+    confidence: m.confidence || 'medium', note: '', source: m.source || 'text', venue: m.venue || '',
+    price: out && num(m.cost) ? Math.round(num(m.cost) / (num(m.eaten) || 1) * 100) / 100 : null, priceNote: '',
+    keep: { recipeId: m.recipeId, recipeSource: m.recipeSource, extras: m.extras }, ingredients: ings
+  };
+}
 const MEAL_HINT = { plate: 'Shoot from above so portions are clear', recipe: 'Get the ingredients list and serving count in shot', out: 'Photo of your plate before you start' };
 const MEAL_TEXT_LABEL = { text: 'What did you eat? Include amounts if you know them', out: 'Where and what? (optional)' };
 function setMin(v) {
   min = v;
   document.querySelectorAll('[data-min]').forEach(b => b.setAttribute('aria-pressed', b.dataset.min === v));
-  $('#m-photo-wrap').hidden = v === 'text';
+  const bc = v === 'barcode';
+  $('#m-photo-wrap').hidden = v === 'text' || bc;
   $('#m-rcpt-wrap').hidden = v !== 'out';
+  $('#m-text-label').hidden = bc; $('#m-go').hidden = bc; if (bc) $('#m-status').hidden = true;
+  if (bc) {
+    // Barcode: start a meal you build item by item, beginning with the scanner open
+    if (!mealRes) mealRes = newMealRes('barcode');
+    mealAdd = 'bc'; renderMealReview(); startMealCam();
+    if (!mealRes.ingredients.length) { const pn = $('#ma-panel'); if (pn && pn.scrollIntoView) pn.scrollIntoView({ block: 'center' }); }
+  } else if (mealRes && !mealRes.editId && !mealRes.ingredients.length) { clearMealReview(); }
   renderMealPhotos();
   $('#m-text-label').firstChild.textContent = MEAL_TEXT_LABEL[v] || 'Anything to add?';
   $('#m-text').placeholder = v === 'out' ? 'e.g. The Red Lion, Pizza Express, shared starter, my share of the bill was £18' : 'e.g. lentil dhal with brown rice, used 1 tbsp olive oil';
@@ -1892,12 +1986,12 @@ Give typical per-100g values for every ingredient as bought, even when it matche
   try {
     const res = await ask(prompt, nPh ? files.m.slice(0, maxImages) : null);
     if (!res || !Array.isArray(res.ingredients) || !res.ingredients.length) throw { code: 'empty_completion' };
-    mealRes = {
+    takeEstimate({
       name: String(res.name || 'Meal'), servings: Math.max(num(res.servings) || 1, 1), eaten: 1,
       confidence: ['low', 'medium', 'high'].includes(res.confidence) ? res.confidence : 'medium', note: res.note || '',
-      source: min,
-      ingredients: res.ingredients.map(x => ({ name: String(x.name || 'Ingredient'), grams: Math.max(0, num(x.grams)), productId: x.productId && S.products[x.productId] ? x.productId : null, per100: Object.fromEntries(NUT.map(k => [k, num(x.per100 && x.per100[k])])) }))
-    };
+      source: min, date: S.day, type: mealTypeNow(),
+      ingredients: res.ingredients.map(x => ingFrom(x, 'Ingredient'))
+    });
     done(); renderMealReview();
   } catch (e) { done(errMsg(e)); }
 }
@@ -1921,55 +2015,188 @@ List the dish's main components, 3–12 of them (e.g. pizza base, mozzarella, to
   try {
     const res = await ask(prompt, imgs.length ? imgs : null);
     if (!res || !Array.isArray(res.ingredients) || !res.ingredients.length) throw { code: 'empty_completion' };
-    mealRes = {
-      name: String(res.name || 'Meal out'), servings: 1, eaten: 1, source: 'out',
+    takeEstimate({
+      name: String(res.name || 'Meal out'), servings: 1, eaten: 1, source: 'out', date: S.day, type: mealTypeNow(),
       venue: res.venue ? String(res.venue) : '', price: numN(res.price), priceNote: res.priceNote || '',
       confidence: ['low', 'medium', 'high'].includes(res.confidence) ? res.confidence : 'low', note: res.note || '',
       ingredients: res.ingredients.map(x => ({ name: String(x.name || 'Component'), grams: Math.max(0, num(x.grams)), productId: null, per100: Object.fromEntries(NUT.map(k => [k, num(x.per100 && x.per100[k])])) }))
-    };
+    });
     done(); renderMealReview();
   } catch (e) { done(errMsg(e)); }
 }
 function mealTypeNow() { const h = new Date().getHours(); return h < 11 ? 'Breakfast' : h < 15 ? 'Lunch' : h < 21 ? 'Dinner' : 'Snack'; }
 function renderMealReview() {
   const box = $('#m-review'); box.hidden = false;
-  const r = mealRes, ps = productList(), out = r.source === 'out';
+  if (bcStream) stopBarcode();
+  const r = mealRes, ps = productList(), out = r.source === 'out', edit = !!r.editId;
   const confC = r.confidence === 'high' ? 'g' : r.confidence === 'low' ? 'r' : 'a';
   const opts = sel => `<option value="">Typical values (not in pantry)</option>` + ps.map(p => `<option value="${esc(p.id)}" ${sel === p.id ? 'selected' : ''}>${esc(p.name)}${p.per100 ? '' : ' (no label)'}</option>`).join('');
+  const estimated = !edit && r.source !== 'barcode';
+  const multi = !out && (r.servings > 1 || r.source === 'recipe');
   box.innerHTML = `<div class="card stack">
-    <div class="row" style="justify-content:space-between"><h3>Check the estimate</h3><span class="chip ${confC}">${r.confidence} confidence</span></div>
-    ${r.note ? `<p class="small muted">${esc(r.note)}</p>` : ''}
-    <label class="f">Meal name<input type="text" id="mr-name" value="${esc(r.name)}"></label>
+    <div class="row" style="justify-content:space-between"><h3>${edit ? 'Edit this meal' : estimated ? 'Check the estimate' : 'Your meal'}</h3>${estimated ? `<span class="chip ${confC}">${r.confidence} confidence</span>` : ''}</div>
+    ${r.note && estimated ? `<p class="small muted">${esc(r.note)}</p>` : ''}
+    <label class="f">Meal name<input type="text" id="mr-name" value="${esc(r.name)}" placeholder="${esc(autoMealName(r.ingredients))}"></label>
     <div class="grid2">
       ${out ? `<label class="f">Where<input type="text" id="mr-venue" value="${esc(r.venue)}" placeholder="Restaurant or pub"></label>
       <label class="f">Price of the dish (£)<input type="number" inputmode="decimal" step="0.01" id="mr-price" value="${r.price ?? ''}"></label>
       <input type="hidden" id="mr-serv" value="1">
-      <label class="f">How much you ate<select id="mr-eat">${[[1, 'All of it'], [0.75, 'Three quarters'], [0.5, 'Half (shared)'], [0.33, 'A third'], [0.25, 'A quarter']].map(([v, t]) => `<option value="${v}">${t}</option>`).join('')}</select></label>`
+      <label class="f">How much you ate<select id="mr-eat">${[[1, 'All of it'], [0.75, 'Three quarters'], [0.5, 'Half (shared)'], [0.33, 'A third'], [0.25, 'A quarter']].map(([v, t]) => `<option value="${v}" ${num(r.eaten) === v ? 'selected' : ''}>${t}</option>`).join('')}</select></label>`
       : `<label class="f">Recipe makes (servings)<input type="number" inputmode="decimal" step="0.5" min="1" id="mr-serv" value="${r.servings}"></label>
       <label class="f">Servings you ate<input type="number" inputmode="decimal" step="0.5" min="0.25" id="mr-eat" value="${r.eaten}"></label>`}
-      <label class="f">Meal<select id="mr-type">${['Breakfast', 'Lunch', 'Dinner', 'Snack'].map(t => `<option ${t === mealTypeNow() ? 'selected' : ''}>${t}</option>`).join('')}</select></label>
-      <label class="f">Date<input type="date" id="mr-date" value="${esc(S.day)}"></label>
+      <label class="f">Meal<select id="mr-type">${['Breakfast', 'Lunch', 'Dinner', 'Snack'].map(t => `<option ${t === (r.type || mealTypeNow()) ? 'selected' : ''}>${t}</option>`).join('')}</select></label>
+      <label class="f">Date<input type="date" id="mr-date" value="${esc(r.date || S.day)}"></label>
     </div>
     ${out && r.priceNote ? `<p class="small muted">Price from the bill: ${esc(r.priceNote)}</p>` : ''}
-    <p class="eyebrow">${out ? 'On the plate (grams as served)' : 'Ingredients (whole recipe)'}</p>
-    <div id="mr-ings">${r.ingredients.map((g, i) => `
-      <div class="ing"><input type="text" id="mi-name-${i}" value="${esc(g.name)}" aria-label="Ingredient">
-        <input type="number" inputmode="decimal" id="mi-g-${i}" value="${r0(g.grams)}" aria-label="Grams">
-        ${out ? '' : `<select class="wide" id="mi-p-${i}" aria-label="Match to pantry product">${opts(g.productId)}</select>`}
-        <div class="meta" id="mi-meta-${i}"></div></div>`).join('')}</div>
+    <p class="eyebrow">${out ? 'On the plate (grams as served)' : multi ? 'Ingredients (whole recipe, grams)' : 'What\'s in it (grams)'}</p>
+    <div id="mr-ings">${r.ingredients.length ? r.ingredients.map((g, i) => `
+      <div class="ing rm"><input type="text" id="mi-name-${i}" value="${esc(g.name)}" aria-label="Food">
+        <input type="number" inputmode="decimal" id="mi-g-${i}" value="${g.portion ? r1(g.grams / 100) : r0(g.grams)}" step="${g.portion ? 0.25 : 1}" aria-label="${g.portion ? 'Portions' : 'Grams'}">
+        <button type="button" class="x" data-act="mrdel" data-i="${i}" aria-label="Remove ${esc(g.name)}">×</button>
+        ${out || g.portion ? '' : `<select class="wide" id="mi-p-${i}" aria-label="Match to pantry product">${opts(g.productId)}</select>`}
+        <div class="meta" id="mi-meta-${i}"></div></div>`).join('') : `<p class="small muted">Nothing in this meal yet. Add food below.</p>`}</div>
+    <div class="stack" style="gap:8px">
+      <p class="eyebrow">Add more to this meal</p>
+      <div class="addbar">
+        <button type="button" class="btn ghost sm" data-act="maopen" data-k="bc" aria-pressed="${mealAdd === 'bc'}">Scan a barcode</button>
+        <button type="button" class="btn ghost sm" data-act="maopen" data-k="text" aria-pressed="${mealAdd === 'text'}">Describe it</button>
+        <button type="button" class="btn ghost sm" data-act="maopen" data-k="pantry" aria-pressed="${mealAdd === 'pantry'}">From my pantry</button>
+      </div>
+      <div id="ma-panel"></div>
+    </div>
     <div class="plain" id="mr-total"></div>
-    <div class="row"><button class="btn" id="mr-save">Log meal</button><button class="btn ghost" id="mr-cancel">Discard</button></div>
+    <div class="row"><button class="btn" id="mr-save">${edit ? 'Save changes' : 'Log meal'}</button><button class="btn ghost" id="mr-cancel">${edit ? 'Cancel' : 'Discard'}</button>${edit ? `<span style="flex:1"></span><button class="linkbtn del" data-act="delmeal" data-id="${esc(r.editId)}">Delete meal</button>` : ''}</div>
   </div>`;
-  box.querySelectorAll('input,select').forEach(el => el.addEventListener('input', recalcMeal));
+  box.querySelectorAll('#mr-ings input, #mr-ings select, .grid2 input, .grid2 select').forEach(el => el.addEventListener('input', recalcMeal));
   $('#mr-save').onclick = saveMeal;
-  $('#mr-cancel').onclick = () => { mealRes = null; box.hidden = true; box.innerHTML = ''; };
+  $('#mr-cancel').onclick = () => { const inSheet = mealSheetOpen(); clearMealReview(); if (inSheet) closeMealSheet(); };
+  renderAddPanel();
   recalcMeal();
+}
+function renderAddPanel() {
+  const el = $('#ma-panel'); if (!el) return;
+  if (mealAdd === 'bc') {
+    const f = maFound;
+    el.innerHTML = `<div class="plain stack">
+      <div class="cam" id="ma-cam" hidden><video id="ma-video" playsinline muted></video><div class="aim"></div></div>
+      <div class="row"><button type="button" class="btn sm" id="ma-start" data-act="macam">Start camera</button><button type="button" class="btn ghost sm" id="ma-stop" data-act="macamstop" hidden>Stop camera</button></div>
+      <div class="row" style="align-items:flex-end"><label class="f" style="flex:1;min-width:150px">Or type the barcode number<input type="text" id="ma-code" inputmode="numeric" autocomplete="off" placeholder="e.g. 5000157024671"></label><button type="button" class="btn ghost sm" data-act="malook">Look up</button></div>
+      <p class="status" id="ma-status" hidden></p>
+      ${f ? `<div class="stack" style="gap:8px;border-top:1px solid var(--line);padding-top:10px">
+        <div><b>${esc(f.name)}</b><br><span class="small muted">${r0(num(f.per100.kcal))} kcal per 100g${f.grams ? ' · pack ' + r0(f.grams) + 'g' : ''}${f.servingText ? ' · serving ' + esc(f.servingText) : ''}</span></div>
+        <div class="row" style="align-items:flex-end"><label class="f" style="flex:1;min-width:120px">How much? (g)<input type="number" id="ma-g" inputmode="decimal" min="1" value="${r0(f.serving || f.grams || 100)}"></label>
+          ${f.grams ? `<button type="button" class="btn ghost sm" data-act="mapack">Whole pack</button>` : ''}<button type="button" class="btn sm" data-act="maaddbc">Add</button></div></div>` : ''}
+    </div>`;
+  } else if (mealAdd === 'text') {
+    el.innerHTML = `<div class="plain stack">
+      <label class="f">What else is in it? Amounts help<textarea id="ma-text" placeholder="e.g. 2 eggs as an omelette, 1 tbsp pumpkin seeds, 1 tbsp ground flaxseed, 100g cooked lentils"></textarea></label>
+      ${apiKey() ? '' : '<p class="small muted">Describing food needs your Anthropic API key (My goals). Barcodes and pantry items work without it.</p>'}
+      <button type="button" class="btn sm" id="ma-go" data-act="maaddtext" ${apiKey() ? '' : 'disabled'}>Work it out and add</button>
+      <p class="status" id="ma-status" hidden></p></div>`;
+  } else if (mealAdd === 'pantry') {
+    const ps = productList().filter(p => p.per100);
+    el.innerHTML = ps.length ? `<div class="plain stack">
+      <label class="f">Product<select id="ma-prod">${ps.map(p => `<option value="${esc(p.id)}">${esc(p.name)}</option>`).join('')}</select></label>
+      <div class="row" style="align-items:flex-end"><label class="f" style="flex:1;min-width:120px">How much? (g)<input type="number" id="ma-pg" inputmode="decimal" min="1" value="100"></label><button type="button" class="btn sm" data-act="maaddprod">Add</button></div></div>`
+      : `<div class="plain"><p class="small muted">No pantry products with nutrition yet. Scan a barcode or a label and they'll show up here.</p></div>`;
+  } else el.innerHTML = '';
+}
+function maSay(msg, err) { const st = $('#ma-status'); if (!st) return; st.hidden = !msg; st.className = 'status' + (err ? ' err' : ''); st.innerHTML = msg || ''; }
+function startMealCam() { if ($('#ma-video')) startCam('ma', code => { const c = $('#ma-code'); if (c) c.value = code; maLookup(code); }, maSay); }
+async function maLookup(code) {
+  code = String(code || '').replace(/\D/g, '');
+  if (code.length < 8) return maSay('Enter the full number under the barcode (8 to 14 digits).', true);
+  maSay('<span class="spin"></span>Looking it up…');
+  try {
+    const res = await fetchBarcode(code);
+    if (res.missing) { maFound = null; renderAddPanel(); return maSay(`${res.p ? 'No nutrition info' : 'Not in the food database'} for <span class="mono">${esc(code)}</span>. Use "Describe it" instead, or scan its label on the Scan tab.`, true); }
+    maFound = res; renderAddPanel(); const g = $('#ma-g'); if (g) g.focus();
+  } catch (e) { maSay(navigator.onLine === false ? OFFLINE_BC : "Couldn't reach the food database. Try again in a moment.", true); }
+}
+function addToMeal(items, msg) {
+  readMealForm();
+  mealRes.ingredients.push(...items);
+  mealAdd = null; maFound = null;
+  renderMealReview();
+  if (msg) toast(msg);
+  const t = $('#mr-total'); if (t) t.scrollIntoView({ block: 'center' });
+}
+async function maAddBarcode() {
+  const f = maFound, g = num($('#ma-g') && $('#ma-g').value);
+  if (!f || g <= 0) return toast('Enter how many grams you had.');
+  const p = await bcSaveProduct(f);
+  addToMeal([{ name: f.name, grams: g, productId: p.id, per100: f.per100 }], `Added ${f.name}: ${r0(num(f.per100.kcal) * g / 100)} kcal.`);
+}
+async function maAddText() {
+  const txt = ($('#ma-text').value || '').trim();
+  if (!txt) return maSay('Say what you added first.', true);
+  readMealForm();
+  const pantry = productList().slice(0, 250).map(p => `${p.id} | ${p.name}${p.grams ? ' | ' + packText(p) : ''}`).join('\n') || '(empty)';
+  const prompt = `Estimate the nutrition of some extra food being added to a meal, for a UK calorie and macro tracker.
+The meal already contains: ${mealRes.ingredients.map(g => g.name).join(', ') || 'nothing yet'}.
+The user is adding: ${txt.slice(0, 2000)}
+The user's pantry (products they have bought): id | name | pack size
+${pantry}
+Reply with ONLY this JSON:
+{"ingredients": [{"name": string, "grams": number (weight of this item as described; ml as g), "productId": "pantry id if this is clearly one of the user's products, else null", "per100": {"kcal": n, "fat": n, "sat": n, "carbs": n, "sugars": n, "fibre": n, "protein": n, "salt": n}, "eaten100": kcal per 100 g once cooked if the grams are a dry weight that cooking in water changes (dry pasta, rice, lentils, oats), else null, "drink": true only for something drunk on its own (tea, coffee, juice), else false}]}
+List only the new items, one per food. Use the user's amounts and convert household measures to grams (a large egg is about 60 g, 1 tbsp of seeds about 10 g). If no amount is given, assume a typical single portion. Give per-100g values for the food in the state described (cooked lentils as cooked, eggs as raw weight), and include any cooking oil or butter they mention.`;
+  const done = busy($('#ma-go'), $('#ma-status'), 'Working it out…', 'Estimating amounts and nutrition. Usually 10–30 seconds.');
+  try {
+    const res = await ask(prompt, null);
+    if (!res || !Array.isArray(res.ingredients) || !res.ingredients.length) throw { code: 'empty_completion' };
+    done();
+    const items = res.ingredients.map(x => ingFrom(x, 'Food'));
+    const kc = items.reduce((a, g) => a + num(g.per100.kcal) * g.grams / 100, 0);
+    addToMeal(items, `Added ${items.length} item${items.length > 1 ? 's' : ''}: about ${r0(kc)} kcal.`);
+  } catch (e) { done(errMsg(e)); }
+}
+function maAddPantry() {
+  const p = S.products[$('#ma-prod').value], g = num($('#ma-pg').value);
+  if (!p || g <= 0) return toast('Pick a product and enter the grams.');
+  addToMeal([{ name: p.name, grams: g, productId: p.id, per100: p.per100 }], `Added ${p.name}.`);
+}
+
+/* meal sheet: the Log a meal panel shown over Today, for adding or editing a meal without leaving the page */
+function mealSheetOpen() { return !$('#msheet').hidden; }
+function openMealSheet(title) {
+  $('#msheet-h').textContent = title;
+  const pm = $('#p-meal');
+  $('#msheet-body').appendChild(pm);
+  pm.hidden = false; $('#m-head').hidden = true;
+  $('#msheet').hidden = false;
+  $('#msheet .sheet').scrollTop = 0;
+}
+function closeMealSheet() {
+  if (bcStream) stopBarcode();
+  if (mealRes && mealRes.editId) clearMealReview();
+  const pm = $('#p-meal');
+  $('#v-scan').appendChild(pm);
+  pm.hidden = scanMode !== 'meal'; $('#m-head').hidden = false; $('#m-inputs').hidden = false;
+  $('#msheet').hidden = true;
+}
+function addMealFrom(mode) {
+  if (mealRes && mealRes.editId) clearMealReview();
+  $('#m-inputs').hidden = false;
+  openMealSheet(S.day === iso(new Date()) ? 'Add a meal' : 'Add a meal for ' + dayLabel(S.day));
+  if (mealRes) mealRes.date = S.day;
+  setMin(mode || (min === 'barcode' ? 'plate' : min));
+}
+function editMeal(id) {
+  const m = S.meals[id]; if (!m) return;
+  if (mealRes && !mealRes.editId && (mealRes.ingredients || []).length && !confirm('Discard the meal you were in the middle of logging?')) return;
+  clearMealReview();
+  mealRes = mealResFrom(m);
+  $('#m-inputs').hidden = true;
+  openMealSheet('Edit meal');
+  renderMealReview();
 }
 function readMealForm() {
   const r = mealRes;
-  r.ingredients.forEach((g, i) => { g.name = $('#mi-name-' + i).value; g.grams = num($('#mi-g-' + i).value); const s = $('#mi-p-' + i); g.productId = s ? (s.value || null) : null; });
+  if (!$('#mr-serv')) return r;
+  r.ingredients.forEach((g, i) => { const n = $('#mi-name-' + i); if (!n) return; g.name = n.value; g.grams = num($('#mi-g-' + i).value) * (g.portion ? 100 : 1); const s = $('#mi-p-' + i); if (s) g.productId = s.value || null; });
   r.servings = Math.max(num($('#mr-serv').value) || 1, 1); r.eaten = Math.max(num($('#mr-eat').value) || 1, 0.25);
   if (r.source === 'out') { r.venue = $('#mr-venue').value.trim(); r.price = numN($('#mr-price').value); }
+  r.name = $('#mr-name').value.trim(); r.type = $('#mr-type').value; r.date = $('#mr-date').value || r.date;
   return r;
 }
 function mealCost(r, c) {
@@ -1982,9 +2209,11 @@ function recalcMeal() {
     const p = g.productId ? S.products[g.productId] : null;
     const per = (p && p.per100) || g.per100;
     const up = unitPrice(p);
-    $('#mi-meta-' + i).innerHTML = r.source === 'out'
+    $('#mi-meta-' + i).innerHTML = g.portion
+      ? `<span>Portions as logged · ${r0(num(per.kcal) * g.grams / 100)} kcal</span>`
+      : r.source === 'out'
       ? `<span>Estimated · ${r0(num(per.kcal) * g.grams / 100)} kcal</span>`
-      : `<span>${p && p.per100 ? 'Your label' : 'Typical values'} · ${r0(num(per.kcal) * g.grams / 100)} kcal</span><span class="mono">${up != null ? gbp(up * g.grams) : 'no price'}</span>`;
+      : `<span>${p && p.per100 ? (p.barcode ? 'From the barcode' : 'Your label') : 'Typical values'} · ${r0(num(per.kcal) * g.grams / 100)} kcal</span><span class="mono">${up != null ? gbp(up * g.grams) : 'no price'}</span>`;
   });
   const c = calcMeal(r.ingredients, r.servings, r.eaten);
   const mc = mealCost(r, c);
@@ -1999,23 +2228,31 @@ function recalcMeal() {
 }
 async function saveMeal() {
   const r = readMealForm();
+  if (!r.ingredients.length) return toast('Add at least one food to this meal.');
   const c = calcMeal(r.ingredients, r.servings, r.eaten);
   const mc = mealCost(r, c);
-  const date = $('#mr-date').value || iso(new Date());
+  const date = r.date || iso(new Date()), edit = !!r.editId;
+  const keep = Object.fromEntries(Object.entries(r.keep || {}).filter(([, v]) => v != null));
   const meal = {
-    id: newId(), date, type: $('#mr-type').value, name: $('#mr-name').value.trim() || r.name,
+    ...keep,
+    id: r.editId || newId(), date, type: r.type, name: r.name || autoMealName(r.ingredients),
     nut: Object.fromEntries(NUT.map(k => [k, r1(c.nut[k])])), mix: mixOut(c.mix),
     cost: mc.priced ? Math.round(mc.cost * 100) / 100 : 0, unpriced: mc.unpriced,
     venue: r.source === 'out' ? (r.venue || '') : undefined,
     servings: r.servings, eaten: r.eaten, confidence: r.confidence, source: r.source,
-    ingredients: r.ingredients.map(g => ({ name: g.name, grams: g.grams, productId: g.productId, per100: g.per100, eaten100: g.eaten100 || null, drink: !!g.drink })), createdAt: Date.now()
+    ingredients: r.ingredients.map(g => { const o = { name: g.name, grams: g.grams, productId: g.productId || null, per100: g.per100, eaten100: g.eaten100 || null, drink: !!g.drink }; if (g.portion) { o.portion = true; o.mix = g.mix; } return o; }),
+    createdAt: r.createdAt || Date.now()
   };
+  if (edit) meal.updatedAt = Date.now();
   await put('meals', meal);
-  mealRes = null; $('#m-review').hidden = true; $('#m-review').innerHTML = '';
-  resetMealPhotos();
-  resetDrop('m2', '#m2-drop', '<span><b>Add the bill (optional)</b><br><span class="muted small">Used to name the dish and record what you paid</span></span>');
-  $('#m-file').value = ''; $('#m2-file').value = ''; $('#m-text').value = '';
-  toast(`${meal.name} logged: ${r0(meal.nut.kcal)} kcal.`);
+  clearMealReview();
+  if (!edit) {
+    resetMealPhotos();
+    resetDrop('m2', '#m2-drop', '<span><b>Add the bill (optional)</b><br><span class="muted small">Used to name the dish and record what you paid</span></span>');
+    $('#m-file').value = ''; $('#m2-file').value = ''; $('#m-text').value = '';
+  }
+  if (mealSheetOpen()) closeMealSheet();
+  toast(`${meal.name} ${edit ? 'updated' : 'logged'}: ${r0(meal.nut.kcal)} kcal.`);
   S.day = date; renderAll(); go('today');
 }
 
@@ -2771,7 +3008,46 @@ document.addEventListener('click', async e => {
   if (a === 'go') { go(t.dataset.tab); if (t.dataset.tab === 'scan') setScan('receipt'); return; }
   if (a === 'day') { const n = +t.dataset.n; const nd = addDays(S.day, n); if (nd <= iso(new Date())) { S.day = nd; renderToday(); } return; }
   if (a === 'logmeal') { go('scan'); setScan('meal'); return; }
-  if (a === 'delmeal') { const m = S.meals[t.dataset.id]; await remove('meals', t.dataset.id); toast(`${m ? m.name : 'Meal'} deleted.`); return renderToday(); }
+  if (a === 'addmeal') return addMealFrom(t.dataset.m);
+  if (a === 'editmeal') return editMeal(t.dataset.id);
+  if (a === 'delmeal') {
+    const m = S.meals[t.dataset.id];
+    if (mealSheetOpen() && !confirm(`Delete ${m ? m.name : 'this meal'}?`)) return;
+    await remove('meals', t.dataset.id);
+    if (mealRes && mealRes.editId === t.dataset.id) { clearMealReview(); if (mealSheetOpen()) closeMealSheet(); }
+    toast(`${m ? m.name : 'Meal'} deleted.`); return renderAll();
+  }
+  if (a === 'mrdel') { readMealForm(); mealRes.ingredients.splice(+t.dataset.i, 1); return renderMealReview(); }
+  if (a === 'maopen') {
+    readMealForm(); const k = t.dataset.k;
+    mealAdd = mealAdd === k ? null : k; maFound = null;
+    if (bcStream) stopBarcode();
+    document.querySelectorAll('[data-act="maopen"]').forEach(b => b.setAttribute('aria-pressed', b.dataset.k === mealAdd));
+    renderAddPanel();
+    if (mealAdd === 'bc') startMealCam();
+    if (mealAdd === 'text') $('#ma-text').focus();
+    return;
+  }
+  if (a === 'macam') return startMealCam();
+  if (a === 'macamstop') return stopBarcode();
+  if (a === 'malook') return maLookup($('#ma-code').value);
+  if (a === 'mapack') { const g = $('#ma-g'); if (g && maFound) g.value = r0(maFound.grams); return; }
+  if (a === 'maaddbc') return maAddBarcode();
+  if (a === 'maaddtext') return maAddText();
+  if (a === 'maaddprod') return maAddPantry();
+  if (a === 'bcmore') {
+    const r = bcRes, g = num($('#bc-g').value);
+    if (!r || g <= 0) return toast('Enter how many grams you had.');
+    const p = await bcSaveProduct();
+    if (mealRes && mealRes.editId) clearMealReview();
+    const item = { name: r.name, grams: g, productId: p.id, per100: r.per100 };
+    if (mealRes && mealRes.ingredients.length) { readMealForm(); mealRes.ingredients.push(item); }
+    else { mealRes = newMealRes('barcode', [item]); mealRes.date = iso(new Date()); mealRes.type = $('#bc-type').value; }
+    bcRes = null; $('#bc-out').innerHTML = ''; $('#bc-code').value = '';
+    $('#m-inputs').hidden = true;
+    openMealSheet('Build your meal'); mealAdd = null; renderMealReview();
+    return;
+  }
   if (a === 'toggleprod') { S.openProd = S.openProd === t.dataset.id ? null : t.dataset.id; return renderPantry(); }
   if (a === 'scanlabel') { labelPre = t.dataset.id; go('scan'); setScan('label'); return; }
   if (a === 'saveprod') {
@@ -2836,6 +3112,12 @@ document.addEventListener('change', async e => {
 $('#r-go').onclick = readReceipt;
 $('#l-go').onclick = readLabel;
 $('#m-go').onclick = estimateMeal;
+$('#msheet-close').onclick = closeMealSheet;
+$('#msheet').addEventListener('click', e => { if (e.target.id === 'msheet') closeMealSheet(); });
+document.addEventListener('keydown', e => {
+  if (e.key === 'Escape' && mealSheetOpen()) return closeMealSheet();
+  if ((e.key === 'Enter' || e.key === ' ') && e.target.classList && e.target.classList.contains('meal') && e.target.dataset.act === 'editmeal') { e.preventDefault(); editMeal(e.target.dataset.id); }
+});
 $('#i-go').onclick = getIdeas;
 $('#pl-go').onclick = makePlan;
 $('#h-go').onclick = findHave;
