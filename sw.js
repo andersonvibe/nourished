@@ -1,6 +1,6 @@
 // Nourished service worker: makes the app open offline and load fast.
 // Bump VERSION whenever you upload a new index.html so phones pick it up.
-const VERSION = 'nourished-v8';
+const VERSION = 'nourished-v9';
 const SHELL = ['./', './index.html', './manifest.webmanifest', './icon-192.png', './icon-512.png', './icon-maskable-512.png'];
 
 self.addEventListener('install', e => {

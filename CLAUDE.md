@@ -17,13 +17,13 @@ Glen Anderson's own Noom-style weight-loss and nutrition app (formerly "Basket t
 
 ## Releasing a change
 1. Edit `index.html`.
-2. Bump the footer label `<span class="mono">Version N</span>` (search for `Version `) and `VERSION` in `sw.js` (`nourished-vN`) to the same N. Current: **8**.
+2. Bump the footer label `<span class="mono">Version N</span>` (search for `Version `) and `VERSION` in `sw.js` (`nourished-vN`) to the same N. Current: **9**.
 3. Syntax-check the main script (extract the last `<script>` block and run `node --check`).
 4. Test headlessly with Playwright (Chromium is at `/opt/pw-browsers/chromium`): serve files via `page.route`, stub `https://api.anthropic.com/v1/messages` (responses are **streamed SSE**) and `world.openfoodfacts.org`.
 5. Commit and push. Glen closes and reopens the app to pick it up and can confirm the version number at the bottom of the Home screen.
 
 ## Architecture
-- **Storage:** everything in `localStorage` on the phone. Key `basket-to-plate-v1` holds `{settings, products, meals, receipts, weights, plans, exercise}` (old key name kept so data isn't lost). Backup/restore to a JSON file in My goals (merges, never wipes).
+- **Storage:** everything in `localStorage` on the phone. Key `basket-to-plate-v1` holds `{settings, products, meals, receipts, weights, plans, exercise, recipes}` (old key name kept so data isn't lost). Backup/restore to a JSON file in My goals (merges, never wipes).
 - **Claude:** direct browser calls to the Anthropic Messages API with Glen's own key (`localStorage['basket-to-plate-key']`, never in backups or the repo), header `anthropic-dangerous-direct-browser-access: true`. Model setting: `claude-sonnet-5-5` (default) or `claude-haiku-5-5`.
   - `ask(prompt, files, opts)` streams via `streamClaude()`, handles `pause_turn`, parses JSON from the final text, salvages complete items if an answer is cut short (`salvageArray`), and collects web-search result URLs into `lastSearchUrls`.
   - `callClaude()` (non-streamed) is only used for the key test.
@@ -33,6 +33,8 @@ Glen Anderson's own Noom-style weight-loss and nutrition app (formerly "Basket t
 - **Calorie target:** Mifflin-St Jeor BMR × activity − pace × 7700/7 kcal; floor 1,500 (men) / 1,200 (women). Protein target 1.2 g × goal weight. Exercise: MET table `EX`, counting (MET − 1) × kg × hours; "eat back" setting 0 / 0.5 (default) / 1.
 - **Food balance:** energy density per 100 g: light ≤ 100 kcal, moderate ≤ 240, dense above. Aims: light ≥ 30% of calories, dense ≤ 25%.
 - **Meal photos:** a meal can have up to 6 photos (`files.m` is an array, `MAX_MEAL_PHOTOS`), e.g. prep shot + finished dish; each is shrunk to a 1568px JPEG as soon as it is picked (`shrinkPhoto`, decoding via `<img>` first because `createImageBitmap` failed on full-size Pixel photos), then all are sent in one request and the prompt says to count food seen in several photos once. Photos are only used for the estimate, not stored with the meal (localStorage space).
+- **My recipes (Plan → My recipes, `S.recipes`):** Glen's own recipe book. Import (`importRecipe()`) takes any mix of a link, pasted caption/text, screenshots and a saved video (8 stills taken in the browser by `videoFrames()`); links are opened by Claude's `web_fetch_20250910` server tool (Instagram/Facebook often show only a login wall, so the app asks for the caption or screenshots instead, with per-app tips in `IMPORT_TIP`). TikTok captions are also tried from TikTok's public oEmbed. Claude returns ingredients, steps and per-serving nutrition; edits re-estimate calories (`estimateRecipe()`). Thumbnails are 240px JPEG data URLs. The manifest has a GET `share_target`, so Share → Nourished from Instagram/TikTok/YouTube/Chrome opens `?url=&text=` and `takeShare()` imports straight away.
+- **Own recipes first:** "What can I make?" matches saved recipes locally (`matchMine()`, ingredient word overlap) and shows them above web results; with 3+ strong matches it skips the web search until Glen taps "Also search recipe sites". Recipe ideas (`bookForPrompt()`) and meal plans (`planContext()`) send the saved recipes to Claude and ask it to use them first.
 - **Units:** height ft/in or cm; weight kg, lb, or st+lb (`wUnit()`, `fmtW()`, `wInputHTML()`); stored internally as kg/cm.
 - **Plain shopping names:** receipts store a `generic` name; "Add my recent shopping" asks Claude once per product for any without one (`plainNames()`), with an offline `roughName()` fallback.
 
