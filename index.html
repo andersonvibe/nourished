@@ -538,7 +538,7 @@ a.btn{text-decoration:none}
     <!-- PROGRESS -->
     <section id="v-progress" class="stack" hidden></section>
   </main>
-  <p class="disclaim">Estimates only. Not medical or dietetic advice. <span class="mono">Version 4</span></p>
+  <p class="disclaim">Estimates only. Not medical or dietetic advice. <span class="mono">Version 5</span></p>
 </div>
 
 <nav class="tabs" aria-label="Sections">
@@ -773,12 +773,12 @@ async function ask(prompt, files, opts = {}) {
   content.push({ type: 'text', text: prompt + '\n\nReply with the JSON only: no introduction, no explanation, no code fences.' });
   let messages = [{ role: 'user', content }], all = [], j;
   for (let turn = 0; turn < 4; turn++) {
-    j = await callClaude({ model: model(), max_tokens: opts.maxTokens || 8000, messages, ...(opts.tools ? { tools: opts.tools } : {}) });
+    j = await callClaude({ model: model(), max_tokens: opts.maxTokens || 12000, messages, ...(opts.tools ? { tools: opts.tools } : {}) });
     all = all.concat(j.content || []);
     if (j.stop_reason === 'pause_turn') { messages = [messages[0], { role: 'assistant', content: all }]; continue; }
     break;
   }
-  if (j.stop_reason === 'max_tokens') throw { code: 'truncated' };
+  const cutShort = j.stop_reason === 'max_tokens';
   // remember which pages web search actually returned, so recipe links can be checked
   lastSearchUrls = new Set();
   let lastTool = -1;
@@ -787,9 +787,18 @@ async function ask(prompt, files, opts = {}) {
     if (b.type === 'text' && Array.isArray(b.citations)) b.citations.forEach(c => c.url && lastSearchUrls.add(normUrl(c.url)));
   });
   const text = all.slice(lastTool + 1).filter(b => b.type === 'text').map(b => b.text).join('');
-  const out = parseJSON(text);
-  if (out == null) throw { code: text ? 'invalid_json' : 'empty_completion' };
+  const out = parseJSON(text) ?? (cutShort ? salvageArray(text) : null);
+  if (out == null) throw { code: cutShort ? 'truncated' : text ? 'invalid_json' : 'empty_completion' };
   return out;
+}
+// if an answer is cut off mid-list, keep the items that did arrive complete
+function salvageArray(t) {
+  t = String(t || '').replace(/```(?:json)?/gi, '');
+  const st = t.indexOf('['); if (st < 0) return null;
+  for (let end = t.lastIndexOf('}'); end > st; end = t.lastIndexOf('}', end - 1)) {
+    try { const a = JSON.parse(t.slice(st, end + 1) + ']'); if (Array.isArray(a) && a.length) return a; } catch (e) {}
+  }
+  return null;
 }
 function normUrl(u) { try { const x = new URL(u); return (x.hostname.replace(/^www\./, '') + x.pathname.replace(/\/+$/, '')).toLowerCase(); } catch (e) { return ''; } }
 function busy(btn, statusEl, label, hint) {
@@ -1780,14 +1789,14 @@ const BLOCKED_LS = 'nourished-blocked-sites';
 function blockedSites() { try { return JSON.parse(localStorage.getItem(BLOCKED_LS) || '[]'); } catch (e) { return []; } }
 function recipeSites() { const b = blockedSites(); return RECIPE_SITES.filter(d => !b.includes(d)); }
 function searchTool() {
-  const t = { type: 'web_search_20250305', name: 'web_search', max_uses: 5, user_location: { type: 'approximate', country: 'GB', timezone: 'Europe/London' } };
+  const t = { type: 'web_search_20250305', name: 'web_search', max_uses: 4, user_location: { type: 'approximate', country: 'GB', timezone: 'Europe/London' } };
   const sites = recipeSites(); if (sites.length) t.allowed_domains = sites;
   return t;
 }
 // ask with live web search; if the API says some sites refuse the search, drop them and try again
 async function askWithSearch(prompt) {
   for (let attempt = 0; attempt < 3; attempt++) {
-    try { return await ask(prompt, null, { maxTokens: 10000, tools: [searchTool()] }); }
+    try { return await ask(prompt, null, { maxTokens: 16000, tools: [searchTool()] }); }
     catch (e) {
       const m = e && e.code === 'api' && /not accessible/i.test(e.message || '') ? (e.message.match(/'([a-z0-9.-]+\.[a-z]{2,})'/gi) || []).map(x => x.replace(/'/g, '').toLowerCase()) : [];
       if (!m.length) throw e;
@@ -1837,7 +1846,7 @@ async function findHave() {
   const pm = perMeal();
   const dietTxt = { any: 'eats everything', vegetarian: 'vegetarian (no meat or fish; no meat stock, gelatine or anchovies)', vegan: 'vegan', pescatarian: 'pescatarian' }[S.settings.diet] || 'eats everything';
   const prompt = `Use web search to find REAL published recipes for a UK home cook. Do not invent recipes.
-They have: ${have.slice(0, 600)}
+They have: ${have.slice(0, 600)}\nIf that's a long list, pick the 4 to 6 ingredients that make the best main meals and build around those; ignore snacks and drinks.
 Always in the cupboard: ${staples.slice(0, 300) || 'salt, pepper, oil'}
 Diet: ${dietTxt}. Follow it strictly. Avoid: ${S.settings.dislikes || 'nothing given'}. Likes: ${S.settings.likes || 'not given'}.
 Search the recipe sites for recipes built around these ingredients. Pick 4 recipes of DIFFERENT kinds of dish (e.g. a pasta, a bake, a soup, a curry or salad):
@@ -1845,9 +1854,9 @@ Search the recipe sites for recipes built around these ingredients. Pick 4 recip
 - 1 "stretch" recipe that needs up to 3 extra ingredients to buy.
 Only use recipes that appeared in your search results, with the exact page URL from the results. Prefer recipes rated 4 stars or more out of 5. Report "rating" and "reviews" only if you saw them in the search results for that page; otherwise set both to null. Never guess a rating.
 Prefer recipes whose servings come close to the per-meal calorie aim. For each, estimate nutrition for ONE serving at the recipe's own serving size, counting all the oil, cheese and pasta; be realistic rather than optimistic. This person is losing weight; per-meal targets are about ${pm.kcal} kcal, ${pm.protein} g protein and ${pm.fibre} g fibre. If a serving is short on protein or fibre, or high in calories, say so and suggest 1-2 simple additions or swaps that fit the dish (e.g. stir 120 g cooked green lentils into the sauce; serve with a big green salad; halve the cheese), each with grams and the calories and protein it adds per serving.
-Your final message must be ONLY a JSON array:
+Keep it brief: no commentary between searches, \"summary\" and \"verdict\" one short sentence each, at most 6 items in \"uses\" and 2 \"boosts\".\nYour final message must be ONLY a JSON array:
 [{"title": exact recipe title, "url": page URL from the search results, "source": site name, "author": string or null, "rating": number or null, "reviews": number or null, "dish": "Pasta" | "Bake" | "Soup" | "Curry" | "Salad" | "Stew" | "Stir-fry" | etc, "stretch": boolean, "mins": n, "serves": n, "summary": "one sentence on the dish", "uses": [what they have that it uses], "staples": [cupboard staples it needs], "buy": [extra items, only for stretch], "kcal": n, "protein": n, "carbs": n, "fat": n, "sat": n, "sugars": n, "fibre": n, "salt": n, "light": % of calories from light foods (under 1 kcal/g), "moderate": %, "dense": % (over 2.4 kcal/g), "verdict": "one short sentence on how it fits their goals", "boosts": [{"text": string, "kcal": n, "protein": n, "fibre": n, "density": "light" | "moderate" | "dense"}]}]`;
-  const done = busy(btn, st, 'Searching recipe sites…', 'Searching the web for well-rated recipes. This usually takes 30–90 seconds.');
+  const done = busy(btn, st, 'Searching recipe sites…', 'Searching recipe sites for well-rated recipes. This can take a minute or two.');
   try {
     const res = await askWithSearch(prompt);
     if (!Array.isArray(res) || !res.length) throw { code: 'empty_completion' };
