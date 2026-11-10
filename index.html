@@ -172,6 +172,12 @@ textarea{min-height:84px;resize:vertical}
 .drop{border:2px dashed var(--line);border-radius:var(--r);padding:18px;text-align:center;display:flex;flex-direction:column;gap:10px;align-items:center;cursor:pointer;background:var(--surface)}
 .drop.has{border-style:solid}
 .drop img{max-height:220px;border-radius:10px;object-fit:contain}
+.mthumbs{display:grid;grid-template-columns:repeat(auto-fill,minmax(96px,1fr));gap:8px}
+.mthumbs:empty{display:none}
+.mthumb{position:relative;aspect-ratio:1;border-radius:10px;overflow:hidden;background:var(--surface);border:1px solid var(--line)}
+.mthumb img{width:100%;height:100%;object-fit:cover;display:block}
+.mthumb button{position:absolute;top:4px;right:4px;width:32px;height:32px;border-radius:50%;border:0;background:rgba(0,0,0,.6);color:#fff;font-size:18px;line-height:1;cursor:pointer;display:grid;place-items:center}
+.mthumb .n{position:absolute;left:6px;bottom:4px;color:#fff;font-size:12px;font-weight:700;text-shadow:0 1px 3px rgba(0,0,0,.8)}
 .filehide{position:absolute;width:1px;height:1px;opacity:0;pointer-events:none}
 .ritem{display:grid;grid-template-columns:auto 1fr;gap:6px 10px;padding-block:12px;border-top:1px solid var(--line)}
 .ritem:first-child{border-top:0}
@@ -433,9 +439,10 @@ a.btn{text-decoration:none}
           <button data-min="text" aria-pressed="false">Describe it</button>
           <button data-min="out" aria-pressed="false">Eaten out</button>
         </div>
-        <div id="m-photo-wrap">
-          <input type="file" accept="image/*" id="m-file" class="filehide">
-          <label class="drop" for="m-file" id="m-drop"><span><b>Tap to take or choose a photo</b><br><span class="muted small" id="m-drop-hint">Shoot from above so portions are clear</span></span></label>
+        <div id="m-photo-wrap" class="stack" style="gap:8px">
+          <input type="file" accept="image/*" multiple id="m-file" class="filehide">
+          <div class="mthumbs" id="m-thumbs" aria-label="Meal photos"></div>
+          <label class="drop" for="m-file" id="m-drop"><span><b id="m-drop-title">Tap to take or choose photos</b><br><span class="muted small" id="m-drop-hint">Shoot from above so portions are clear</span></span></label>
         </div>
         <div id="m-rcpt-wrap" hidden>
           <input type="file" accept="image/*" id="m2-file" class="filehide">
@@ -538,7 +545,7 @@ a.btn{text-decoration:none}
     <!-- PROGRESS -->
     <section id="v-progress" class="stack" hidden></section>
   </main>
-  <p class="disclaim">Estimates only. Not medical or dietetic advice. <span class="mono">Version 6</span></p>
+  <p class="disclaim">Estimates only. Not medical or dietetic advice. <span class="mono">Version 7</span></p>
 </div>
 
 <nav class="tabs" aria-label="Sections">
@@ -707,7 +714,7 @@ async function saveSettings() {
 
 /* ---------- Claude (direct to the Anthropic API with the user's own key) ---------- */
 const KEY_LS = 'basket-to-plate-key';
-let sample = null, canImages = true, maxImages = 4;
+let sample = null, canImages = true, maxImages = 8;
 function apiKey() { try { return localStorage.getItem(KEY_LS) || ''; } catch (e) { return ''; } }
 function model() { return S.settings.model || 'claude-sonnet-5-5'; }
 async function initSample() { sample = apiKey() ? true : null; applyScanAvailability(); }
@@ -1380,7 +1387,34 @@ function labelHTML(per, title) {
 }
 
 /* ---------- SCAN: shared ---------- */
-const files = { r: null, l: null, m: null, m2: null };
+const files = { r: null, l: null, m: [], m2: null };
+// meal photos: several per dish (e.g. prep shot + finished plate), all sent together
+const MAX_MEAL_PHOTOS = 6;
+function renderMealPhotos() {
+  const box = $('#m-thumbs');
+  box.querySelectorAll('img').forEach(i => URL.revokeObjectURL(i.src));
+  box.innerHTML = files.m.map((f, i) => `<div class="mthumb"><img src="${URL.createObjectURL(f)}" alt="Meal photo ${i + 1}"><span class="n">${i + 1}</span><button type="button" data-mrm="${i}" aria-label="Remove photo ${i + 1}">×</button></div>`).join('');
+  const n = files.m.length, full = n >= MAX_MEAL_PHOTOS;
+  $('#m-drop').hidden = full;
+  $('#m-drop').classList.toggle('has', n > 0);
+  $('#m-drop-title').textContent = n ? 'Add another photo' : 'Tap to take or choose photos';
+  const hint = $('#m-drop-hint'); if (hint) hint.textContent = n ? `Same dish from another angle, or while you made it (up to ${MAX_MEAL_PHOTOS})` : (MEAL_HINT[min] || '');
+}
+function bindMealPhotos() {
+  $('#m-file').addEventListener('change', e => {
+    const picked = Array.from(e.target.files || []).filter(f => !f.type || f.type.startsWith('image/'));
+    const room = MAX_MEAL_PHOTOS - files.m.length;
+    if (picked.length > room) toast(`Up to ${MAX_MEAL_PHOTOS} photos per meal. Kept the first ${Math.max(room, 0)}.`);
+    files.m = files.m.concat(picked.slice(0, Math.max(room, 0)));
+    e.target.value = '';
+    renderMealPhotos();
+  });
+  $('#m-thumbs').addEventListener('click', e => {
+    const b = e.target.closest('[data-mrm]'); if (!b) return;
+    files.m.splice(+b.dataset.mrm, 1); renderMealPhotos();
+  });
+}
+function resetMealPhotos() { files.m = []; renderMealPhotos(); }
 function bindDrop(key, inputSel, dropSel, hint) {
   $(inputSel).addEventListener('change', e => {
     const f = e.target.files && e.target.files[0];
@@ -1689,7 +1723,7 @@ function setMin(v) {
   document.querySelectorAll('[data-min]').forEach(b => b.setAttribute('aria-pressed', b.dataset.min === v));
   $('#m-photo-wrap').hidden = v === 'text';
   $('#m-rcpt-wrap').hidden = v !== 'out';
-  const hint = $('#m-drop-hint'); if (hint) hint.textContent = MEAL_HINT[v] || '';
+  renderMealPhotos();
   $('#m-text-label').firstChild.textContent = MEAL_TEXT_LABEL[v] || 'Anything to add?';
   $('#m-text').placeholder = v === 'out' ? 'e.g. The Red Lion, Pizza Express, shared starter, my share of the bill was £18' : 'e.g. lentil dhal with brown rice, used 1 tbsp olive oil';
 }
@@ -1697,22 +1731,27 @@ async function estimateMeal() {
   const btn = $('#m-go'), st = $('#m-status');
   const note = $('#m-text').value.trim();
   const fail = msg => { st.hidden = false; st.className = 'status err'; st.textContent = msg; };
-  if ((min === 'plate' || min === 'recipe') && !files.m) return fail('Choose a photo first, or switch to "Describe it".');
+  if ((min === 'plate' || min === 'recipe') && !files.m.length) return fail('Choose a photo first, or switch to "Describe it".');
   if (min === 'text' && !note) return fail('Describe what you ate first.');
-  if (min === 'out' && !files.m && !files.m2 && !note) return fail('Add a photo of the meal, the bill, or describe what you had.');
+  if (min === 'out' && !files.m.length && !files.m2 && !note) return fail('Add a photo of the meal, the bill, or describe what you had.');
   if (min === 'out') return estimateOut(note);
   const pantry = productList().slice(0, 250).map(p => `${p.id} | ${p.name}${p.grams ? ' | ' + packText(p) : ''}`).join('\n') || '(empty)';
-  const kind = min === 'plate' ? 'a photo of a plated meal' : min === 'recipe' ? 'a photo of a recipe (book, card or screen)' : 'a written description of what they ate';
+  const nPh = min !== 'text' ? Math.min(files.m.length, maxImages) : 0;
+  const kind = min === 'plate'
+    ? (nPh > 1 ? `${nPh} photos of the same single meal, for example the ingredients being prepared and the finished dish. Treat them together as one meal: use every photo to identify ingredients and judge amounts, and count food that appears in more than one photo only once` : 'a photo of a plated meal')
+    : min === 'recipe'
+    ? (nPh > 1 ? `${nPh} photos of one recipe (book, card or screen), which may continue across pages or screenshots. Read them together as one recipe` : 'a photo of a recipe (book, card or screen)')
+    : 'a written description of what they ate';
   const prompt = `Estimate the nutrition of some food for a UK calorie and macro tracker. The input is ${kind}.
 ${note ? 'The user adds: ' + note.slice(0, 3000) : ''}
 The user's pantry (products they have bought): id | name | pack size
 ${pantry}
 Reply with ONLY this JSON:
 {"name": "short dish name", "servings": number of servings the ingredient amounts below make (1 for a single plated portion; the recipe's stated servings for a recipe), "confidence": "low" | "medium" | "high", "note": "one short sentence on the biggest uncertainty", "ingredients": [{"name": string, "grams": number (raw, as-bought weight for the whole amount; ml as g), "productId": "pantry id if this ingredient is clearly one of the user's products, else null", "per100": {"kcal": n, "fat": n, "sat": n, "carbs": n, "sugars": n, "fibre": n, "protein": n, "salt": n}}]}
-Give typical per-100g values for every ingredient as bought, even when it matches a pantry product. Include oil, butter, dressings and sauces that are visible or listed. For a plated meal, judge portion sizes from the plate and cutlery. Keep to the main 3–14 ingredients.`;
+Give typical per-100g values for every ingredient as bought, even when it matches a pantry product. Include oil, butter, dressings and sauces that are visible or listed. For a plated meal, judge portion sizes from the plate and cutlery; with several photos, use the clearest view of each item and remember that prep photos may show raw amounts that shrink or absorb water when cooked. Keep to the main 3–14 ingredients.`;
   const done = busy(btn, st, 'Estimating…', 'Working out ingredients and portions. This usually takes 15–45 seconds.');
   try {
-    const res = await ask(prompt, min !== 'text' ? [files.m] : null);
+    const res = await ask(prompt, nPh ? files.m.slice(0, maxImages) : null);
     if (!res || !Array.isArray(res.ingredients) || !res.ingredients.length) throw { code: 'empty_completion' };
     mealRes = {
       name: String(res.name || 'Meal'), servings: Math.max(num(res.servings) || 1, 1), eaten: 1,
@@ -1726,8 +1765,11 @@ Give typical per-100g values for every ingredient as bought, even when it matche
 async function estimateOut(note) {
   const btn = $('#m-go'), st = $('#m-status');
   const imgs = [], desc = [];
-  if (files.m) { imgs.push(files.m); desc.push(`Image ${imgs.length} is a photo of the meal.`); }
-  if (files.m2 && imgs.length < maxImages) { imgs.push(files.m2); desc.push(`Image ${imgs.length} is the restaurant bill or receipt.`); }
+  const mealPh = files.m.slice(0, files.m2 ? maxImages - 1 : maxImages);
+  mealPh.forEach(f => imgs.push(f));
+  if (mealPh.length === 1) desc.push('Image 1 is a photo of the meal.');
+  else if (mealPh.length > 1) desc.push(`Images 1 to ${mealPh.length} are photos of the same meal from different angles or moments; treat them as one meal and count each item once.`);
+  if (files.m2) { imgs.push(files.m2); desc.push(`Image ${imgs.length} is the restaurant bill or receipt.`); }
   const prompt = `Estimate the nutrition of a meal eaten out in the UK (restaurant, pub, café or takeaway) for a calorie and macro tracker. It is one person's meal.
 ${desc.join(' ')}
 ${note ? 'The user adds: ' + note.slice(0, 2000) : ''}
@@ -1831,7 +1873,7 @@ async function saveMeal() {
   };
   await put('meals', meal);
   mealRes = null; $('#m-review').hidden = true; $('#m-review').innerHTML = '';
-  resetDrop('m', '#m-drop', `<span><b>Tap to take or choose a photo</b><br><span class="muted small" id="m-drop-hint">${MEAL_HINT[min] || ''}</span></span>`);
+  resetMealPhotos();
   resetDrop('m2', '#m2-drop', '<span><b>Add the bill (optional)</b><br><span class="muted small">Used to name the dish and record what you paid</span></span>');
   $('#m-file').value = ''; $('#m2-file').value = ''; $('#m-text').value = '';
   toast(`${meal.name} logged: ${r0(meal.nut.kcal)} kcal.`);
@@ -2269,7 +2311,7 @@ $('#pl-go').onclick = makePlan;
 $('#h-go').onclick = findHave;
 bindDrop('r', '#r-file', '#r-drop');
 bindDrop('l', '#l-file', '#l-drop');
-bindDrop('m', '#m-file', '#m-drop');
+bindMealPhotos();
 bindDrop('m2', '#m2-file', '#m2-drop');
 
 // goals sheet

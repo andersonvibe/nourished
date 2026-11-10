@@ -17,7 +17,7 @@ Glen Anderson's own Noom-style weight-loss and nutrition app (formerly "Basket t
 
 ## Releasing a change
 1. Edit `index.html`.
-2. Bump the footer label `<span class="mono">Version N</span>` (search for `Version `) and `VERSION` in `sw.js` (`nourished-vN`) to the same N. Current: **6**.
+2. Bump the footer label `<span class="mono">Version N</span>` (search for `Version `) and `VERSION` in `sw.js` (`nourished-vN`) to the same N. Current: **7**.
 3. Syntax-check the main script (extract the last `<script>` block and run `node --check`).
 4. Test headlessly with Playwright (Chromium is at `/opt/pw-browsers/chromium`): serve files via `page.route`, stub `https://api.anthropic.com/v1/messages` (responses are **streamed SSE**) and `world.openfoodfacts.org`.
 5. Commit and push. Glen closes and reopens the app to pick it up and can confirm the version number at the bottom of the Home screen.
@@ -32,6 +32,7 @@ Glen Anderson's own Noom-style weight-loss and nutrition app (formerly "Basket t
 - **Barcode scanning:** camera via `BarcodeDetector` (Chrome on Android) or typed number → pantry first (`product.barcode`) → Open Food Facts API v2 (free, no Claude). Unknown products fall back to a label photo, which is then linked to the barcode.
 - **Calorie target:** Mifflin-St Jeor BMR × activity − pace × 7700/7 kcal; floor 1,500 (men) / 1,200 (women). Protein target 1.2 g × goal weight. Exercise: MET table `EX`, counting (MET − 1) × kg × hours; "eat back" setting 0 / 0.5 (default) / 1.
 - **Food balance:** energy density per 100 g: light ≤ 100 kcal, moderate ≤ 240, dense above. Aims: light ≥ 30% of calories, dense ≤ 25%.
+- **Meal photos:** a meal can have up to 6 photos (`files.m` is an array, `MAX_MEAL_PHOTOS`), e.g. prep shot + finished dish; all are sent in one request and the prompt says to count food seen in several photos once. Photos are only used for the estimate, not stored with the meal (localStorage space).
 - **Units:** height ft/in or cm; weight kg, lb, or st+lb (`wUnit()`, `fmtW()`, `wInputHTML()`); stored internally as kg/cm.
 - **Plain shopping names:** receipts store a `generic` name; "Add my recent shopping" asks Claude once per product for any without one (`plainNames()`), with an offline `roughName()` fallback.
 
