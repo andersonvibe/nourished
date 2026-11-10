@@ -538,7 +538,7 @@ a.btn{text-decoration:none}
     <!-- PROGRESS -->
     <section id="v-progress" class="stack" hidden></section>
   </main>
-  <p class="disclaim">Estimates only. Not medical or dietetic advice. <span class="mono">Version 5</span></p>
+  <p class="disclaim">Estimates only. Not medical or dietetic advice. <span class="mono">Version 6</span></p>
 </div>
 
 <nav class="tabs" aria-label="Sections">
@@ -721,7 +721,9 @@ const ERR = {
   truncated: 'The answer was cut short. Try again, or ask for fewer days or recipes.',
   invalid_json: "The answer came back in the wrong shape. Tap the button to try again.",
   empty_completion: 'No answer came back. Try a clearer photo or a shorter description.',
-  bad_image: "That photo couldn't be read. Try another photo."
+  bad_image: "That photo couldn't be read. Try another photo.",
+  backgrounded: 'The search stopped because Nourished was closed or switched away from. Keep the app open on screen until it finishes, then try again.',
+  network: "The connection to Claude dropped. Check your signal and try again."
 };
 const errMsg = e => (e && e.code === 'api' && e.message) ? 'Claude returned an error: ' + e.message : ERR[e && e.code] || "Couldn't reach Claude. Check your connection and try again.";
 async function callClaude(body) {
@@ -743,6 +745,70 @@ async function callClaude(body) {
     throw { code: 'api', message: msg || ('HTTP ' + r.status) };
   }
   return j;
+}
+// streamed version: the connection stays busy (so phones don't drop it) and we can show progress
+let hiddenDuringCall = false;
+document.addEventListener('visibilitychange', () => { if (document.hidden) hiddenDuringCall = true; });
+async function streamClaude(body, onProgress) {
+  let r;
+  try {
+    r = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-api-key': apiKey(), 'anthropic-version': '2023-06-01', 'anthropic-dangerous-direct-browser-access': 'true' },
+      body: JSON.stringify({ ...body, stream: true })
+    });
+  } catch (e) { throw { code: hiddenDuringCall ? 'backgrounded' : navigator.onLine === false ? 'offline' : 'network' }; }
+  if (!r.ok) {
+    let j = null; try { j = await r.json(); } catch (e) {}
+    const msg = (j && j.error && j.error.message) || '';
+    if (r.status === 401 || r.status === 403) throw { code: 'bad_key' };
+    if (/credit balance/i.test(msg)) throw { code: 'no_credit' };
+    if (r.status === 429) throw { code: 'rate_limited' };
+    if (r.status === 529 || r.status >= 500) throw { code: 'overloaded' };
+    throw { code: 'api', message: msg || ('HTTP ' + r.status) };
+  }
+  const reader = r.body.getReader(), dec = new TextDecoder();
+  const blocks = []; let stop = null, buf = '';
+  const handle = (ev, d) => {
+    if (ev === 'error' || d.type === 'error') {
+      const t = d.error && d.error.type;
+      throw t === 'overloaded_error' ? { code: 'overloaded' } : t === 'rate_limit_error' ? { code: 'rate_limited' } : { code: 'api', message: (d.error && d.error.message) || 'stream error' };
+    }
+    if (d.type === 'content_block_start') {
+      const b = JSON.parse(JSON.stringify(d.content_block)); if (b.type === 'text') b.text = b.text || '';
+      if (b.type === 'server_tool_use' || b.type === 'tool_use') b._json = '';
+      blocks[d.index] = b;
+      if (b.type === 'web_search_tool_result' && onProgress) onProgress('Reading recipe pages…');
+    } else if (d.type === 'content_block_delta') {
+      const b = blocks[d.index], x = d.delta || {};
+      if (!b) return;
+      if (x.type === 'text_delta') { b.text += x.text; if (onProgress && /\[\s*\{/.test(b.text)) onProgress('Writing up the recipes…'); }
+      else if (x.type === 'input_json_delta') b._json += x.partial_json || '';
+      else if (x.type === 'citations_delta' && x.citation) (b.citations = b.citations || []).push(x.citation);
+    } else if (d.type === 'content_block_stop') {
+      const b = blocks[d.index];
+      if (b && b._json !== undefined) { try { b.input = JSON.parse(b._json || '{}'); } catch (e) { b.input = {}; } delete b._json;
+        if (b.type === 'server_tool_use' && b.input && b.input.query && onProgress) onProgress('Searching: ' + b.input.query); }
+    } else if (d.type === 'message_delta' && d.delta) stop = d.delta.stop_reason || stop;
+  };
+  try {
+    for (;;) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      buf += dec.decode(value, { stream: true });
+      let i;
+      while ((i = buf.indexOf('\n\n')) >= 0) {
+        const chunk = buf.slice(0, i); buf = buf.slice(i + 2);
+        let ev = '', data = '';
+        for (const line of chunk.split('\n')) { if (line.startsWith('event:')) ev = line.slice(6).trim(); else if (line.startsWith('data:')) data += line.slice(5).trim(); }
+        if (data) handle(ev, JSON.parse(data));
+      }
+    }
+  } catch (e) {
+    if (e && e.code) throw e;
+    throw { code: hiddenDuringCall ? 'backgrounded' : navigator.onLine === false ? 'offline' : 'network' };
+  }
+  return { content: blocks.filter(Boolean), stop_reason: stop };
 }
 // shrink photos before sending: faster, cheaper, and well within the API's image limits
 async function toImageBlock(file) {
@@ -768,12 +834,13 @@ function parseJSON(t) {
 let lastSearchUrls = new Set();
 async function ask(prompt, files, opts = {}) {
   if (!apiKey()) throw { code: 'no_key' };
+  hiddenDuringCall = false;
   const content = [];
   for (const f of (files || []).slice(0, maxImages)) content.push(await toImageBlock(f));
   content.push({ type: 'text', text: prompt + '\n\nReply with the JSON only: no introduction, no explanation, no code fences.' });
   let messages = [{ role: 'user', content }], all = [], j;
   for (let turn = 0; turn < 4; turn++) {
-    j = await callClaude({ model: model(), max_tokens: opts.maxTokens || 12000, messages, ...(opts.tools ? { tools: opts.tools } : {}) });
+    j = await streamClaude({ model: model(), max_tokens: opts.maxTokens || 12000, messages, ...(opts.tools ? { tools: opts.tools } : {}) }, opts.onProgress);
     all = all.concat(j.content || []);
     if (j.stop_reason === 'pause_turn') { messages = [messages[0], { role: 'assistant', content: all }]; continue; }
     break;
@@ -1794,9 +1861,13 @@ function searchTool() {
   return t;
 }
 // ask with live web search; if the API says some sites refuse the search, drop them and try again
-async function askWithSearch(prompt) {
+async function askWithSearch(prompt, onProgress) {
+  let lock = null; try { if (navigator.wakeLock) lock = await navigator.wakeLock.request('screen'); } catch (e) {}
+  try { return await askWithSearchInner(prompt, onProgress); } finally { try { if (lock) lock.release(); } catch (e) {} }
+}
+async function askWithSearchInner(prompt, onProgress) {
   for (let attempt = 0; attempt < 3; attempt++) {
-    try { return await ask(prompt, null, { maxTokens: 16000, tools: [searchTool()] }); }
+    try { return await ask(prompt, null, { maxTokens: 16000, tools: [searchTool()], onProgress }); }
     catch (e) {
       const m = e && e.code === 'api' && /not accessible/i.test(e.message || '') ? (e.message.match(/'([a-z0-9.-]+\.[a-z]{2,})'/gi) || []).map(x => x.replace(/'/g, '').toLowerCase()) : [];
       if (!m.length) throw e;
@@ -1856,9 +1927,10 @@ Only use recipes that appeared in your search results, with the exact page URL f
 Prefer recipes whose servings come close to the per-meal calorie aim. For each, estimate nutrition for ONE serving at the recipe's own serving size, counting all the oil, cheese and pasta; be realistic rather than optimistic. This person is losing weight; per-meal targets are about ${pm.kcal} kcal, ${pm.protein} g protein and ${pm.fibre} g fibre. If a serving is short on protein or fibre, or high in calories, say so and suggest 1-2 simple additions or swaps that fit the dish (e.g. stir 120 g cooked green lentils into the sauce; serve with a big green salad; halve the cheese), each with grams and the calories and protein it adds per serving.
 Keep it brief: no commentary between searches, \"summary\" and \"verdict\" one short sentence each, at most 6 items in \"uses\" and 2 \"boosts\".\nYour final message must be ONLY a JSON array:
 [{"title": exact recipe title, "url": page URL from the search results, "source": site name, "author": string or null, "rating": number or null, "reviews": number or null, "dish": "Pasta" | "Bake" | "Soup" | "Curry" | "Salad" | "Stew" | "Stir-fry" | etc, "stretch": boolean, "mins": n, "serves": n, "summary": "one sentence on the dish", "uses": [what they have that it uses], "staples": [cupboard staples it needs], "buy": [extra items, only for stretch], "kcal": n, "protein": n, "carbs": n, "fat": n, "sat": n, "sugars": n, "fibre": n, "salt": n, "light": % of calories from light foods (under 1 kcal/g), "moderate": %, "dense": % (over 2.4 kcal/g), "verdict": "one short sentence on how it fits their goals", "boosts": [{"text": string, "kcal": n, "protein": n, "fibre": n, "density": "light" | "moderate" | "dense"}]}]`;
-  const done = busy(btn, st, 'Searching recipe sites…', 'Searching recipe sites for well-rated recipes. This can take a minute or two.');
+  const done = busy(btn, st, 'Searching recipe sites…', 'Searching recipe sites for well-rated recipes. This can take a minute or two. Keep the app open until it finishes.');
   try {
-    const res = await askWithSearch(prompt);
+    const say = t => { const sp = st.querySelector('span:last-child'); if (sp) sp.textContent = t + ' Keep the app open until it finishes.'; };
+    const res = await askWithSearch(prompt, say);
     if (!Array.isArray(res) || !res.length) throw { code: 'empty_completion' };
     haveRes = res.slice(0, 5).map(r => {
       const url = /^https:\/\//.test(r.url || '') ? r.url : '';
