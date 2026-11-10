@@ -573,13 +573,8 @@ a.btn{text-decoration:none}
         <div id="rb-list" class="stack"></div>
       </div>
       <details class="plain">
-        <summary>How the food balance works</summary>
-        <div class="stack small">
-          <p>Foods are grouped by how many calories they pack into each gram. The lighter the food, the more you can eat for the same calories.</p>
-          <p><span class="dot g"></span><b>Light</b>, under 1 kcal per gram: vegetables, fruit, broth soups, fat-free yoghurt, skyr, cottage cheese. Fill up on these. Aim for at least 30% of your calories.</p>
-          <p><span class="dot y"></span><b>Moderate</b>, 1 to 2.4 kcal per gram: eggs, beans, lentils, tofu, wholegrain rice and pasta, potatoes, lean meat and fish. The backbone of most meals.</p>
-          <p><span class="dot o"></span><b>Dense</b>, over 2.4 kcal per gram: cheese, nuts, seeds, oils, butter, bread, crisps, chocolate. Healthy ones are fine in measured portions. Keep these to about a quarter of your calories.</p>
-        </div>
+        <summary>How the food balance works, and where it comes from</summary>
+        <div class="stack small" data-density-help></div>
       </details>
       <details class="plain">
         <summary>Eating for a healthier liver and heart</summary>
@@ -601,7 +596,7 @@ a.btn{text-decoration:none}
     <!-- PROGRESS -->
     <section id="v-progress" class="stack" hidden></section>
   </main>
-  <p class="disclaim">Estimates only. Not medical or dietetic advice. <span class="mono">Version 9</span></p>
+  <p class="disclaim">Estimates only. Not medical or dietetic advice. <span class="mono">Version 10</span></p>
 </div>
 
 <nav class="tabs" aria-label="Sections">
@@ -990,24 +985,66 @@ function packText(p) { return p.grams ? (p.grams >= 1000 ? r1(p.grams / 1000) + 
 
 function calcMeal(ings, servings, eaten) {
   const t = Object.fromEntries(NUT.map(k => [k, 0]));
-  const mix = { g: 0, y: 0, o: 0 };
+  const mix = { g: 0, y: 0, o: 0, w: 0, wk: 0 };
   let cost = 0, priced = 0, unpriced = 0;
   for (const ing of ings || []) {
     const g = num(ing.grams);
     const p = ing.productId ? S.products[ing.productId] : null;
     const per = (p && p.per100) || ing.per100 || {};
     NUT.forEach(k => t[k] += num(per[k]) * g / 100);
-    mix[densityOf(num(per.kcal))] += num(per.kcal) * g / 100;
+    // energy density is judged as eaten: dry pasta or lentils use their cooked kcal/100g (eaten100)
+    const kc = num(per.kcal) * g / 100, ed = num(ing.eaten100) || num(per.kcal);
+    mix[densityOf(ed)] += kc;
+    if (!ing.drink) { mix.w += ed > 0 ? kc / ed * 100 : g; mix.wk += kc; }
     const up = unitPrice(p);
     if (up != null) { cost += up * g; priced++; } else unpriced++;
   }
   const f = num(eaten || 1) / Math.max(num(servings) || 1, 0.25);
   NUT.forEach(k => t[k] *= f);
-  ['g', 'y', 'o'].forEach(k => mix[k] *= f);
+  ['g', 'y', 'o', 'w', 'wk'].forEach(k => mix[k] *= f);
   return { nut: t, mix, cost: cost * f, priced, unpriced };
 }
-// Food balance by energy density (kcal per 100g): light <=100, moderate <=240, dense above
-function densityOf(k100) { return k100 <= 100 ? 'g' : k100 <= 240 ? 'y' : 'o'; }
+/* Food balance by energy density (kcal per gram of food as eaten).
+   Bands follow Barbara Rolls' Volumetrics categories (Penn State; also used in CDC guidance):
+   1 very low <0.6, 2 low 0.6-1.5, 3 medium 1.5-4, 4 high >4. The app groups 1+2 as Light.
+   Day goal: WCRF/AICR (2007) public health goal of 1.25 kcal/g average for food, not drinks. */
+const ED_LIGHT = 150, ED_DENSE = 400, ED_GOAL = 1.25;
+function densityOf(k100) { return k100 < ED_LIGHT ? 'g' : k100 <= ED_DENSE ? 'y' : 'o'; }
+// mix = kcal by band {g,y,o}; w = grams of food as eaten (drinks left out); wk = kcal of that weighed food
+function mixOut(mx, f = 1) {
+  const o = { g: r0(num(mx.g) * f), y: r0(num(mx.y) * f), o: r0(num(mx.o) * f) };
+  if (num(mx.w) > 0) { o.w = r0(num(mx.w) * f); o.wk = r0(num(mx.wk) * f); }
+  return o;
+}
+function mixED(mix) { return mix && num(mix.w) > 0 && num(mix.wk) > 0 ? num(mix.wk) / num(mix.w) : null; }
+// mix from Claude's % split; grams = weight of the food as eaten (no drinks)
+function mixFromSplit(kcal, x, grams) {
+  const t = num(x.light) + num(x.moderate) + num(x.dense) || 100;
+  const o = { g: kcal * num(x.light) / t, y: kcal * num(x.moderate) / t, o: kcal * num(x.dense) / t };
+  if (num(grams) > 0) { o.w = num(grams); o.wk = kcal; }
+  return o;
+}
+const DENSITY_SOURCES = [
+  ['Rolls BJ. The Ultimate Volumetrics Diet. HarperCollins, 2012 (energy density categories 1 to 4).', ''],
+  ['Rolls BJ. The relationship between dietary energy density and energy intake. Physiology & Behavior 2009;97:609-15.', 'https://pubmed.ncbi.nlm.nih.gov/?term=Rolls+relationship+between+dietary+energy+density+and+energy+intake'],
+  ['CDC. Low-Energy-Dense Foods and Weight Management: Cutting Calories While Controlling Hunger. Research to Practice Series No. 5.', 'https://webarchive.library.unt.edu/web/20120925032653/http://www.cdc.gov/healthyweight/healthy_eating/energy_density.html'],
+  ['Pérez-Escamilla R et al. Dietary energy density and body weight in adults and children: a systematic review. J Acad Nutr Diet 2012;112:671-84.', 'https://pubmed.ncbi.nlm.nih.gov/?term=Dietary+energy+density+and+body+weight+in+adults+and+children+systematic+review'],
+  ['World Cancer Research Fund / AICR (2007): diets should average 125 kcal per 100g of food, not counting drinks; as quoted by Food Standards Scotland, Briefing paper on discretionary foods and drinks (2026).', 'https://www.foodstandards.gov.scot/science-and-evidence/briefing-paper-on-discretionary-foods-and-drinks/section-11'],
+  ['Wrieden WL, Barton KL. The Scottish Diet: Estimations of Energy Density and Expenditure. Food Standards Agency in Scotland, 2011 (average Scottish food: 205 kcal per 100g).', 'https://www.foodstandards.gov.scot/sites/default/files/migration/downloads/Energy_Density_Report.pdf'],
+  ['Department of Health and Food Standards Agency. Guide to creating a front of pack nutrition label (2016): the traffic-light thresholds for fat, saturates, sugars and salt.', 'https://www.gov.uk/government/publications/front-of-pack-nutrition-labelling-guidance']
+];
+function densityHelpHTML() {
+  return `<p>Foods are grouped by <b>energy density</b>: how many calories they pack into each gram, as you eat them. It is one of the best-studied ideas in weight management. In controlled studies led by Professor Barbara Rolls at Penn State, people ate fewer calories without feeling hungrier when meals were lower in energy density, and a 2012 systematic review for the Academy of Nutrition and Dietetics found lower energy density diets linked with lower body weight in adults.</p>
+  <p><span class="dot g"></span><b>Light</b>, under 1.5 kcal per gram: vegetables, salad, fruit, broth and lentil soups, fat-free yoghurt, skyr, cottage cheese, cooked beans and lentils, porridge made with water. Fill up on these.</p>
+  <p><span class="dot y"></span><b>Medium</b>, 1.5 to 4 kcal per gram: eggs, tofu, cooked rice and pasta, bread, hummus, lean meat and fish, most ready meals. Fine in normal portions.</p>
+  <p><span class="dot o"></span><b>Dense</b>, over 4 kcal per gram: oils, butter, nuts, seeds, hard cheese, chocolate, crisps, biscuits. Measure these. Some, like olive oil, nuts and seeds, are good for your heart; dense means "easy to overdo", not "bad".</p>
+  <p>These are the four Volumetrics categories (very low, low, medium, high), with the first two shown together as Light. Weights are as eaten, so dry pasta or lentils count at their cooked weight.</p>
+  <p><b>The day's goal</b> is an average of 1.25 kcal per gram of food or less, leaving drinks out. That's the public health goal set by the World Cancer Research Fund. For comparison, the average Scottish diet works out at about 2 kcal per gram of food. Older entries logged before Version 10 have no weights, so they're left out of the average.</p>
+  <p><b>Traffic lights</b> (low, med, high fat, saturates, sugars and salt per 100g) use the UK government's front-of-pack labelling thresholds, the same ones on supermarket packs.</p>
+  <p class="muted">Calories and weights from photos are Claude's estimates, so treat the numbers as a guide. This is general information, not medical advice.</p>
+  <p><b>Sources</b></p>
+  <ol style="margin:0;padding-left:18px;display:grid;gap:4px">${DENSITY_SOURCES.map(([t, u]) => `<li>${u ? `<a href="${u}" target="_blank" rel="noopener">${esc(t)}</a>` : esc(t)}</li>`).join('')}</ol>`;
+}
 function mealMix(m) {
   if (m.mix) return m.mix;
   if (m.ingredients && m.ingredients.length) return calcMeal(m.ingredients, m.servings, m.eaten).mix;
@@ -1016,10 +1053,11 @@ function mealMix(m) {
 function mealsOn(day) { return Object.values(S.meals).filter(m => m.date === day).sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0)); }
 function dayTotals(day) {
   const t = Object.fromEntries(NUT.map(k => [k, 0])); let cost = 0;
-  const mix = { g: 0, y: 0, o: 0 };
+  const mix = { g: 0, y: 0, o: 0, w: 0, wk: 0, n: 0, nw: 0 };
   for (const m of mealsOn(day)) {
     NUT.forEach(k => t[k] += num(m.nut && m.nut[k])); cost += num(m.cost);
-    const mm = mealMix(m); ['g', 'y', 'o'].forEach(k => mix[k] += num(mm[k]));
+    const mm = mealMix(m); ['g', 'y', 'o', 'w', 'wk'].forEach(k => mix[k] += num(mm[k]));
+    mix.n++; if (num(mm.w) > 0) mix.nw++;
   }
   return { t, cost, mix };
 }
@@ -1297,28 +1335,41 @@ function mixPct(mix) {
   if (!tot) return null;
   return { g: num(mix.g) / tot * 100, y: num(mix.y) / tot * 100, o: num(mix.o) / tot * 100 };
 }
+function mixLine(mix) {
+  const p = mixPct(mix); if (!p) return '';
+  const ed = mixED(mix);
+  return `<span class="dot g"></span>${r0(p.g)}% light · <span class="dot y"></span>${r0(p.y)}% medium · <span class="dot o"></span>${r0(p.o)}% dense${ed != null ? ` · <span class="mono">${r1(ed)} kcal per gram</span>` : ''}`;
+}
 function mixDots(mix) {
   const p = mixPct(mix); if (!p) return '';
   const top = ['g', 'y', 'o'].sort((a, b) => p[b] - p[a])[0];
-  const nm = { g: 'Mostly light', y: 'Mostly moderate', o: 'Mostly dense' }[top];
-  return `<span><span class="dot ${top}"></span>${nm}</span>`;
+  const nm = { g: 'Mostly light', y: 'Mostly medium', o: 'Mostly dense' }[top];
+  const ed = mixED(mix);
+  return `<span><span class="dot ${top}"></span>${nm}${ed != null ? ` · <span class="mono">${r1(ed)} kcal/g</span>` : ''}</span>`;
 }
 function balanceCard(mix, kcal) {
   const p = mixPct(mix);
-  if (!p) return `<div class="card stack"><h3>Food balance</h3><p class="small muted">Log a meal to see how much of today's food was light, moderate or dense. Light foods fill you up for the fewest calories.</p></div>`;
-  const good = p.g >= 30 && p.o <= 25;
-  const msg = good ? 'Nicely balanced. Plenty of filling, light food.'
-    : p.g < 30 ? 'Add more light foods: veg, fruit, soup, salad or fat-free yoghurt.'
-    : 'Dense foods are a big share today. Measure cheese, nuts, oils and bread.';
+  const how = `<details class="plain"><summary class="small">How is this worked out?</summary><div class="stack small" style="margin-top:8px">${densityHelpHTML()}</div></details>`;
+  if (!p) return `<div class="card stack"><h3>Food balance</h3><p class="small muted">Log a meal to see how filling today's food is for its calories. Light foods fill you up for the fewest calories.</p>${how}</div>`;
+  const ed = mixED(mix);
+  const good = ed != null && ed <= ED_GOAL;
+  const chip = ed == null ? '' : `<span class="chip ${good ? 'g' : 'a'}">${good ? 'Meets the goal' : 'Above the goal'}</span>`;
+  const msg = ed == null ? 'Meals logged before Version 10 have no weights, so the day\'s average shows from your next meal on.'
+    : good ? 'Nicely filling for the calories. Plenty of light food.'
+    : p.o > 25 ? 'Dense foods are a big share today. Measure oil, butter, nuts and cheese, and add veg, salad or soup.'
+    : 'Bulk meals out with veg, salad, fruit, soup or lentils to bring the average down.';
+  const part = mix.nw && mix.nw < mix.n ? ` (from ${mix.nw} of ${mix.n} meals)` : '';
   return `<div class="card stack">
-    <div class="row" style="justify-content:space-between"><h3>Food balance</h3><span class="chip ${good ? 'g' : 'a'}">${good ? 'On track' : 'Room to improve'}</span></div>
-    <div class="mixbar" role="img" aria-label="Light ${r0(p.g)}%, moderate ${r0(p.y)}%, dense ${r0(p.o)}% of calories"><span class="g" style="width:${p.g}%"></span><span class="y" style="width:${p.y}%"></span><span class="o" style="width:${p.o}%"></span></div>
+    <div class="row" style="justify-content:space-between"><h3>Food balance</h3>${chip}</div>
+    ${ed != null ? `<p style="margin:0"><b class="mono" style="font-size:1.3em">${r1(ed)}</b> kcal per gram of food today${part}. <span class="muted">Goal: ${ED_GOAL} or less.</span></p>` : ''}
+    <div class="mixbar" role="img" aria-label="Light ${r0(p.g)}%, medium ${r0(p.y)}%, dense ${r0(p.o)}% of calories"><span class="g" style="width:${p.g}%"></span><span class="y" style="width:${p.y}%"></span><span class="o" style="width:${p.o}%"></span></div>
     <div class="mixleg">
-      <div><span><span class="dot g"></span>Light</span><b>${r0(p.g)}%</b><span class="muted">aim 30%+</span></div>
-      <div><span><span class="dot y"></span>Moderate</span><b>${r0(p.y)}%</b><span class="muted">around 45%</span></div>
-      <div><span><span class="dot o"></span>Dense</span><b>${r0(p.o)}%</b><span class="muted">under 25%</span></div>
+      <div><span><span class="dot g"></span>Light</span><b>${r0(p.g)}%</b><span class="muted">under 1.5 kcal/g</span></div>
+      <div><span><span class="dot y"></span>Medium</span><b>${r0(p.y)}%</b><span class="muted">1.5 to 4</span></div>
+      <div><span><span class="dot o"></span>Dense</span><b>${r0(p.o)}%</b><span class="muted">over 4</span></div>
     </div>
-    <p class="small muted">${msg}</p></div>`;
+    <p class="small muted">Share of today's calories. ${msg}</p>
+    ${how}</div>`;
 }
 
 /* ---------- PROGRESS ---------- */
@@ -1602,7 +1653,7 @@ function renderBarcode() {
   const def = r.serving || 100;
   $('#bc-out').innerHTML = `<div class="card stack">
     <div class="stack" style="gap:4px"><h3>${esc(r.name)}</h3><span class="small muted">${r.from === 'pantry' ? 'From your pantry' : 'From Open Food Facts'} · <span class="mono">${esc(r.code)}</span>${r.servingText ? ' · serving ' + esc(r.servingText) : ''}</span></div>
-    <div class="lights"><span class="chip n"><span class="dot ${dens}"></span>${{ g: 'Light', y: 'Moderate', o: 'Dense' }[dens]} · ${r0(k100)} kcal/100g</span>${lightsHTML(per)}</div>
+    <div class="lights"><span class="chip n"><span class="dot ${dens}"></span>${{ g: 'Light', y: 'Medium', o: 'Dense' }[dens]} · ${r1(k100 / 100)} kcal/g</span>${lightsHTML(per)}</div>
     <div class="grid2">
       <label class="f">How much did you have? (g)<input type="number" id="bc-g" inputmode="decimal" min="1" step="1" value="${r0(def)}"></label>
       <label class="f">Meal<select id="bc-type">${['Breakfast', 'Lunch', 'Dinner', 'Snack'].map(t => `<option ${t === mealTypeNow() ? 'selected' : ''}>${t}</option>`).join('')}</select></label>
@@ -1633,7 +1684,7 @@ async function bcLog() {
   const p = await bcSaveProduct();
   const c = calcMeal([{ name: r.name, grams: g, productId: p.id, per100: r.per100 }], 1, 1);
   await put('meals', { id: newId(), date: iso(new Date()), type: $('#bc-type').value, name: `${r.name} (${r0(g)} g)`, nut: Object.fromEntries(NUT.map(k => [k, r1(c.nut[k])])),
-    mix: { g: r0(c.mix.g), y: r0(c.mix.y), o: r0(c.mix.o) }, cost: c.priced ? Math.round(c.cost * 100) / 100 : 0, unpriced: c.unpriced, source: 'barcode',
+    mix: mixOut(c.mix), cost: c.priced ? Math.round(c.cost * 100) / 100 : 0, unpriced: c.unpriced, source: 'barcode',
     ingredients: [{ name: r.name, grams: g, productId: p.id, per100: r.per100 }], servings: 1, eaten: 1, createdAt: Date.now() });
   toast(`${r.name} logged: ${r0(c.nut.kcal)} kcal.`);
   bcRes = null; $('#bc-out').innerHTML = ''; $('#bc-code').value = '';
@@ -1835,7 +1886,7 @@ ${note ? 'The user adds: ' + note.slice(0, 3000) : ''}
 The user's pantry (products they have bought): id | name | pack size
 ${pantry}
 Reply with ONLY this JSON:
-{"name": "short dish name", "servings": number of servings the ingredient amounts below make (1 for a single plated portion; the recipe's stated servings for a recipe), "confidence": "low" | "medium" | "high", "note": "one short sentence on the biggest uncertainty", "ingredients": [{"name": string, "grams": number (raw, as-bought weight for the whole amount; ml as g), "productId": "pantry id if this ingredient is clearly one of the user's products, else null", "per100": {"kcal": n, "fat": n, "sat": n, "carbs": n, "sugars": n, "fibre": n, "protein": n, "salt": n}}]}
+{"name": "short dish name", "servings": number of servings the ingredient amounts below make (1 for a single plated portion; the recipe's stated servings for a recipe), "confidence": "low" | "medium" | "high", "note": "one short sentence on the biggest uncertainty", "ingredients": [{"name": string, "grams": number (raw, as-bought weight for the whole amount; ml as g), "productId": "pantry id if this ingredient is clearly one of the user's products, else null", "per100": {"kcal": n, "fat": n, "sat": n, "carbs": n, "sugars": n, "fibre": n, "protein": n, "salt": n}, "eaten100": kcal per 100 g once cooked if cooking in water changes its weight (dry pasta, rice, lentils, oats), else null, "drink": true only for something drunk on its own (tea, coffee, juice, a glass of milk), else false}]}
 Give typical per-100g values for every ingredient as bought, even when it matches a pantry product. Include oil, butter, dressings and sauces that are visible or listed. For a plated meal, judge portion sizes from the plate and cutlery; with several photos, use the clearest view of each item and remember that prep photos may show raw amounts that shrink or absorb water when cooked. Keep to the main 3–14 ingredients.`;
   const done = busy(btn, st, 'Estimating…', 'Working out ingredients and portions. This usually takes 15–45 seconds.');
   try {
@@ -1864,7 +1915,7 @@ ${note ? 'The user adds: ' + note.slice(0, 2000) : ''}
 Restaurant portions are usually bigger and richer than home cooking: allow for cooking oil, butter, cheese, sauces, dressings and fried sides. If the venue is a UK chain whose published nutrition you know for this dish, base the estimate on it and say so in the note.
 If there is a bill, work out which dish or dishes this person had (use the photo and the user's note) and what those lines cost. If the bill covers several people and you can't tell which lines were theirs, set price to null.
 Reply with ONLY this JSON:
-{"name": "dish name", "venue": "venue name or null", "price": number or null (£ for this person's items), "priceNote": "which bill lines the price covers, or null", "confidence": "low" | "medium" | "high", "note": "one short sentence on the biggest uncertainty", "ingredients": [{"name": string, "grams": number (amount on the plate, as served), "per100": {"kcal": n, "fat": n, "sat": n, "carbs": n, "sugars": n, "fibre": n, "protein": n, "salt": n} (values for the food as served)}]}
+{"name": "dish name", "venue": "venue name or null", "price": number or null (£ for this person's items), "priceNote": "which bill lines the price covers, or null", "confidence": "low" | "medium" | "high", "note": "one short sentence on the biggest uncertainty", "ingredients": [{"name": string, "grams": number (amount on the plate, as served), "per100": {"kcal": n, "fat": n, "sat": n, "carbs": n, "sugars": n, "fibre": n, "protein": n, "salt": n} (values for the food as served), "drink": true only for a drink, else false}]}
 List the dish's main components, 3–12 of them (e.g. pizza base, mozzarella, tomato sauce, toppings; or bun, beef patty, cheese, mayo, chips).`;
   const done = busy(btn, st, 'Estimating…', 'Working out the dish and portion. This usually takes 15–45 seconds.');
   try {
@@ -1942,7 +1993,7 @@ function recalcMeal() {
     : `<b class="mono">${c.priced ? gbp(c.cost) : '£–'}</b> <span class="muted">from your receipt prices${c.unpriced ? ` · ${c.unpriced} ingredient${c.unpriced > 1 ? 's' : ''} not priced` : ''}</span>`;
   $('#mr-total').innerHTML = `<div class="row" style="justify-content:space-between;align-items:baseline">
       <span class="eyebrow">You ate</span><span style="font-family:var(--f-display);font-weight:800;font-size:1.5rem" class="mono">${r0(c.nut.kcal)} kcal</span></div>
-    ${(() => { const p = mixPct(c.mix); return p ? `<div class="mixbar" style="margin-top:8px;height:10px"><span class="g" style="width:${p.g}%"></span><span class="y" style="width:${p.y}%"></span><span class="o" style="width:${p.o}%"></span></div><div class="small muted" style="margin-top:4px"><span class="dot g"></span>${r0(p.g)}% light · <span class="dot y"></span>${r0(p.y)}% moderate · <span class="dot o"></span>${r0(p.o)}% dense</div>` : ''; })()}
+    ${(() => { const p = mixPct(c.mix); return p ? `<div class="mixbar" style="margin-top:8px;height:10px"><span class="g" style="width:${p.g}%"></span><span class="y" style="width:${p.y}%"></span><span class="o" style="width:${p.o}%"></span></div><div class="small muted" style="margin-top:4px">${mixLine(c.mix)}</div>` : ''; })()}
     <div class="mono small" style="margin-top:6px">Protein ${r0(c.nut.protein)}g · Carbs ${r0(c.nut.carbs)}g (sugars ${r0(c.nut.sugars)}g) · Fat ${r0(c.nut.fat)}g (sat ${r1(c.nut.sat)}g) · Fibre ${r0(c.nut.fibre)}g · Salt ${r1(c.nut.salt)}g</div>
     <div class="small" style="margin-top:6px">${costLine}</div>`;
 }
@@ -1953,11 +2004,11 @@ async function saveMeal() {
   const date = $('#mr-date').value || iso(new Date());
   const meal = {
     id: newId(), date, type: $('#mr-type').value, name: $('#mr-name').value.trim() || r.name,
-    nut: Object.fromEntries(NUT.map(k => [k, r1(c.nut[k])])), mix: { g: r0(c.mix.g), y: r0(c.mix.y), o: r0(c.mix.o) },
+    nut: Object.fromEntries(NUT.map(k => [k, r1(c.nut[k])])), mix: mixOut(c.mix),
     cost: mc.priced ? Math.round(mc.cost * 100) / 100 : 0, unpriced: mc.unpriced,
     venue: r.source === 'out' ? (r.venue || '') : undefined,
     servings: r.servings, eaten: r.eaten, confidence: r.confidence, source: r.source,
-    ingredients: r.ingredients.map(g => ({ name: g.name, grams: g.grams, productId: g.productId, per100: g.per100 })), createdAt: Date.now()
+    ingredients: r.ingredients.map(g => ({ name: g.name, grams: g.grams, productId: g.productId, per100: g.per100, eaten100: g.eaten100 || null, drink: !!g.drink })), createdAt: Date.now()
   };
   await put('meals', meal);
   mealRes = null; $('#m-review').hidden = true; $('#m-review').innerHTML = '';
@@ -2066,7 +2117,7 @@ Search the recipe sites for recipes built around these ingredients. Pick 4 recip
 Only use recipes that appeared in your search results, with the exact page URL from the results.${haveMine.length ? ' They already have these saved, so find different ones: ' + haveMine.map(m => (S.recipes[m.id] || {}).title).filter(Boolean).join('; ') + '.' : ''} Prefer recipes rated 4 stars or more out of 5. Report "rating" and "reviews" only if you saw them in the search results for that page; otherwise set both to null. Never guess a rating.
 Prefer recipes whose servings come close to the per-meal calorie aim. For each, estimate nutrition for ONE serving at the recipe's own serving size, counting all the oil, cheese and pasta; be realistic rather than optimistic. This person is losing weight; per-meal targets are about ${pm.kcal} kcal, ${pm.protein} g protein and ${pm.fibre} g fibre. If a serving is short on protein or fibre, or high in calories, say so and suggest 1-2 simple additions or swaps that fit the dish (e.g. stir 120 g cooked green lentils into the sauce; serve with a big green salad; halve the cheese), each with grams and the calories and protein it adds per serving.
 Keep it brief: no commentary between searches, \"summary\" and \"verdict\" one short sentence each, at most 6 items in \"uses\" and 2 \"boosts\".\nYour final message must be ONLY a JSON array:
-[{"title": exact recipe title, "url": page URL from the search results, "source": site name, "author": string or null, "rating": number or null, "reviews": number or null, "dish": "Pasta" | "Bake" | "Soup" | "Curry" | "Salad" | "Stew" | "Stir-fry" | etc, "stretch": boolean, "mins": n, "serves": n, "summary": "one sentence on the dish", "uses": [what they have that it uses], "staples": [cupboard staples it needs], "buy": [extra items, only for stretch], "kcal": n, "protein": n, "carbs": n, "fat": n, "sat": n, "sugars": n, "fibre": n, "salt": n, "light": % of calories from light foods (under 1 kcal/g), "moderate": %, "dense": % (over 2.4 kcal/g), "verdict": "one short sentence on how it fits their goals", "boosts": [{"text": string, "kcal": n, "protein": n, "fibre": n, "density": "light" | "moderate" | "dense"}]}]`;
+[{"title": exact recipe title, "url": page URL from the search results, "source": site name, "author": string or null, "rating": number or null, "reviews": number or null, "dish": "Pasta" | "Bake" | "Soup" | "Curry" | "Salad" | "Stew" | "Stir-fry" | etc, "stretch": boolean, "mins": n, "serves": n, "summary": "one sentence on the dish", "uses": [what they have that it uses], "staples": [cupboard staples it needs], "buy": [extra items, only for stretch], "kcal": n, "protein": n, "carbs": n, "fat": n, "sat": n, "sugars": n, "fibre": n, "salt": n, "grams": weight of the food as eaten in g, not counting drinks, "light": % of calories from light foods (under 1.5 kcal per gram as eaten), "moderate": % from medium foods (1.5 to 4 kcal/g), "dense": % from dense foods (over 4 kcal/g), "verdict": "one short sentence on how it fits their goals", "boosts": [{"text": string, "grams": n, "kcal": n, "protein": n, "fibre": n, "density": "light" | "moderate" | "dense"}]}]`;
   const done = busy(btn, st, 'Searching recipe sites…', 'Searching recipe sites for well-rated recipes. This can take a minute or two. Keep the app open until it finishes.');
   try {
     const say = t => { const sp = st.querySelector('span:last-child'); if (sp) sp.textContent = t + ' Keep the app open until it finishes.'; };
@@ -2083,12 +2134,12 @@ Keep it brief: no commentary between searches, \"summary\" and \"verdict\" one s
 }
 function haveTotals(i) {
   const r = haveRes[i]; const n = {}; NUT.forEach(k => n[k] = num(r[k]));
-  const tot = num(r.light) + num(r.moderate) + num(r.dense) || 100;
-  const mix = { g: n.kcal * num(r.light) / tot, y: n.kcal * num(r.moderate) / tot, o: n.kcal * num(r.dense) / tot };
+  const mix = mixFromSplit(n.kcal, r, r.grams);
   document.querySelectorAll(`[data-boost^="${i}-"]`).forEach(cb => {
     if (!cb.checked) return; const b = r.boosts[+cb.dataset.boost.split('-')[1]]; if (!b) return;
     n.kcal += num(b.kcal); n.protein += num(b.protein); n.fibre += num(b.fibre);
     mix[{ light: 'g', moderate: 'y', dense: 'o' }[b.density] || 'y'] += num(b.kcal);
+    if (mix.w && num(b.grams) > 0) { mix.w += num(b.grams); mix.wk += num(b.kcal); }
   });
   return { n, mix };
 }
@@ -2150,10 +2201,10 @@ function renderHave() {
 async function logHave(i) {
   const r = haveRes[i]; if (!r) return;
   const { n, mix } = haveTotals(i), por = havePortion(i);
-  NUT.forEach(k => n[k] *= por); ['g', 'y', 'o'].forEach(k => mix[k] *= por);
+  NUT.forEach(k => n[k] *= por);
   const boosts = [...document.querySelectorAll(`[data-boost^="${i}-"]`)].filter(c => c.checked).map(c => r.boosts[+c.dataset.boost.split('-')[1]].text);
   await put('meals', { id: newId(), date: iso(new Date()), type: mealTypeNow(), name: r.title + (boosts.length ? ' (with extras)' : '') + (por !== 1 ? ` (${por} serving${por > 1 ? 's' : ''})` : ''), nut: Object.fromEntries(NUT.map(k => [k, r1(n[k])])),
-    mix: { g: r0(mix.g), y: r0(mix.y), o: r0(mix.o) }, cost: 0, unpriced: 0, source: 'recipe', recipeSource: r.source || '', extras: boosts, servings: 1, eaten: 1, createdAt: Date.now() });
+    mix: mixOut(mix, por), cost: 0, unpriced: 0, source: 'recipe', recipeSource: r.source || '', extras: boosts, servings: 1, eaten: 1, createdAt: Date.now() });
   toast(`${r.title} logged: ${r0(n.kcal)} kcal.`);
   renderAll(); renderHave();
 }
@@ -2170,7 +2221,7 @@ async function getIdeas() {
   const recent = Object.values(S.meals).sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0)).slice(0, 25).map(m => m.name);
   const left = r0((num(S.settings.kcal) || 2000) - dayTotals(iso(new Date())).t.kcal);
   const dietTxt = { any: 'eats everything', vegetarian: 'vegetarian', vegan: 'vegan', pescatarian: 'pescatarian' }[S.settings.diet] || 'eats everything';
-  const prompt = `Suggest 3 healthy home-cooked recipes for a UK adult who is losing weight and looking after their liver and cholesterol. Make them filling for the calories: high in protein and fibre, bulked out with vegetables and other light foods (under 1 kcal per gram), slow-release carbs, only measured amounts of dense foods (cheese, nuts, oil). Follow UK healthy-eating guidance: little saturated fat, added sugar and salt. No medical claims. Use UK ingredient names and metric amounts.
+  const prompt = `Suggest 3 healthy home-cooked recipes for a UK adult who is losing weight and looking after their liver and cholesterol. Make them filling for the calories: high in protein and fibre, bulked out with vegetables and other light foods (under 1.5 kcal per gram as eaten), slow-release carbs, only measured amounts of dense foods (over 4 kcal per gram: oil, butter, nuts, hard cheese). Follow UK healthy-eating guidance: little saturated fat, added sugar and salt. No medical claims. Use UK ingredient names and metric amounts.
 Diet: ${dietTxt}. Strictly follow it.
 Likes: ${S.settings.likes || 'not given'}. Avoid: ${S.settings.dislikes || 'nothing given'}.
 Calories left today: ${left > 0 ? left : 'none'} kcal (target ${S.settings.kcal}).
@@ -2260,11 +2311,10 @@ async function tiktokCaption(url) {
   } catch (e) { return ''; }
 }
 function dietText() { return { any: 'eats everything', vegetarian: 'vegetarian (no meat or fish; no meat stock, gelatine or anchovies)', vegan: 'vegan', pescatarian: 'pescatarian' }[S.settings.diet] || 'eats everything'; }
-const NUT_SHAPE = '"kcal": n, "protein": n, "carbs": n, "fat": n, "sat": n, "sugars": n, "fibre": n, "salt": n, "light": % of calories from light foods (under 1 kcal/g), "moderate": %, "dense": % (over 2.4 kcal/g)';
+const NUT_SHAPE = '"kcal": n, "protein": n, "carbs": n, "fat": n, "sat": n, "sugars": n, "fibre": n, "salt": n, "grams": weight of the food as eaten in g, not counting drinks, "light": % of calories from light foods (under 1.5 kcal per gram as eaten), "moderate": % from medium foods (1.5 to 4 kcal/g), "dense": % from dense foods (over 4 kcal/g)';
 function nutFrom(x) {
   const nut = Object.fromEntries(NUT.map(k => [k, r1(num(x[k]))]));
-  const t = num(x.light) + num(x.moderate) + num(x.dense) || 100;
-  return { nut, mix: { g: r0(nut.kcal * num(x.light) / t), y: r0(nut.kcal * num(x.moderate) / t), o: r0(nut.kcal * num(x.dense) / t) } };
+  return { nut, mix: mixOut(mixFromSplit(nut.kcal, x, x.grams)) };
 }
 const strs = (a, n) => (Array.isArray(a) ? a : String(a || '').split('\n')).map(x => String(x).trim()).filter(Boolean).slice(0, n);
 function ingKey(ings, serves) { return strs(ings, 60).join('\n').toLowerCase() + '|' + num(serves); }
@@ -2426,7 +2476,7 @@ async function logRecipe(id, por) {
   const nut = Object.fromEntries(NUT.map(k => [k, r1(num(r.nut[k]) * por)]));
   const mx = r.mix || { g: 0, y: 0, o: 0 };
   await put('meals', { id: newId(), date: iso(new Date()), type: mealTypeNow(), name: r.title + (por !== 1 ? ` (${por} serving${por > 1 ? 's' : ''})` : ''), nut,
-    mix: { g: r0(num(mx.g) * por), y: r0(num(mx.y) * por), o: r0(num(mx.o) * por) }, cost: 0, unpriced: 0, source: 'myrecipe', recipeId: id, recipeSource: r.source || '', servings: 1, eaten: 1, createdAt: Date.now() });
+    mix: mixOut(mx, por), cost: 0, unpriced: 0, source: 'myrecipe', recipeId: id, recipeSource: r.source || '', servings: 1, eaten: 1, createdAt: Date.now() });
   await put('recipes', { ...clone(r), made: (r.made || 0) + 1, lastMade: iso(new Date()) });
   toast(`${r.title} logged: ${r0(nut.kcal)} kcal.`);
   renderAll();
@@ -2555,7 +2605,7 @@ function renderHaveMine() {
 
 /* ---------- MEAL PLAN ---------- */
 function currentPlan() { return S.plans.current || null; }
-const PLAN_SHAPE = `{"type": "Breakfast" | "Lunch" | "Dinner" | "Snack", "name": string, "mins": n, "kcal": n, "protein": n, "carbs": n, "fat": n, "sat": n, "sugars": n, "fibre": n, "salt": n, "light": % of the meal's calories from light foods, "moderate": %, "dense": %, "ingredients": ["40g porridge oats", ...], "steps": ["short step", ...]}`;
+const PLAN_SHAPE = `{"type": "Breakfast" | "Lunch" | "Dinner" | "Snack", "name": string, "mins": n, "kcal": n, "protein": n, "carbs": n, "fat": n, "sat": n, "sugars": n, "fibre": n, "salt": n, "grams": weight of the food as eaten in g, not counting drinks, "light": % of the meal's calories from light foods (under 1.5 kcal per gram as eaten), "moderate": % from medium foods (1.5 to 4 kcal/g), "dense": % from dense foods (over 4 kcal/g), "ingredients": ["40g porridge oats", ...], "steps": ["short step", ...]}`;
 function planContext() {
   const st = S.settings;
   const dietTxt = { any: 'eats everything', vegetarian: 'vegetarian (no meat or fish)', vegan: 'vegan', pescatarian: 'pescatarian' }[st.diet] || 'eats everything';
@@ -2572,7 +2622,7 @@ async function makePlan() {
   const extra = $('#pl-ask').value.trim();
   const prompt = `Create a ${n}-day meal plan for a UK adult who is losing weight steadily, and looking after their liver and cholesterol.
 Daily calorie target: ${kcal} kcal. Each day's meals must add up to within 60 kcal of it. Protein at least ${prot} g a day. Fibre at least 30 g a day.
-Make it filling for the calories: at least 30% of each day's calories from light foods (under 1 kcal per gram: vegetables, salad, fruit, broth soups, fat-free yoghurt, skyr, cottage cheese), no more than 25% from dense foods (over 2.4 kcal per gram: cheese, nuts, seeds, oil, butter, bread, granola, chocolate). Favour high-protein, high-fibre, slow-release foods: oats, pulses, eggs, wholegrains, soya. Little added sugar, saturated fat and salt. No medical claims.
+Make it filling for the calories: each day's food (not drinks) should average about 1.25 kcal per gram as eaten or less (the World Cancer Research Fund goal), built mostly on light foods (under 1.5 kcal per gram as eaten: vegetables, salad, fruit, broth and lentil soups, cooked beans and lentils, fat-free yoghurt, skyr, cottage cheese), with dense foods (over 4 kcal per gram: oil, butter, nuts, seeds, hard cheese, granola, chocolate) in measured amounts. Favour high-protein, high-fibre, slow-release foods: oats, pulses, eggs, wholegrains, soya. Little added sugar, saturated fat and salt. No medical claims.
 ${planContext()}
 Each day has breakfast, lunch, dinner and one snack. Weekday dinners take ${mins} minutes or less; lunches 15 minutes or less or leftovers. Reuse ingredients across days to cut waste and cost, and batch-cook where it makes sense (e.g. "Leftover lentil chilli from day 2"). Plain UK supermarket ingredients with gram amounts for one person.
 ${extra ? 'They also asked: ' + extra.slice(0, 300) : ''}
@@ -2594,8 +2644,7 @@ function cleanPlanMeal(m) {
   const o = { type: String(m.type || 'Meal'), name: String(m.name || 'Meal'), mins: num(m.mins),
     ingredients: (m.ingredients || []).map(String).slice(0, 10), steps: (m.steps || []).map(String).slice(0, 5) };
   NUT.forEach(k => o[k] = r1(num(m[k])));
-  const t = num(m.light) + num(m.moderate) + num(m.dense) || 100;
-  o.mix = { g: r0(o.kcal * num(m.light) / t), y: r0(o.kcal * num(m.moderate) / t), o: r0(o.kcal * num(m.dense) / t) };
+  o.mix = mixOut(mixFromSplit(o.kcal, m, m.grams));
   return o;
 }
 function renderPlan() {
@@ -2608,14 +2657,14 @@ function renderPlan() {
   }
   const di = Math.min(S.planDay, plan.days.length - 1), day = plan.days[di];
   const tot = Object.fromEntries(NUT.map(k => [k, day.meals.reduce((a, m) => a + num(m[k]), 0)]));
-  const mix = day.meals.reduce((a, m) => ({ g: a.g + num(m.mix.g), y: a.y + num(m.mix.y), o: a.o + num(m.mix.o) }), { g: 0, y: 0, o: 0 });
+  const mix = day.meals.reduce((a, m) => ({ g: a.g + num(m.mix.g), y: a.y + num(m.mix.y), o: a.o + num(m.mix.o), w: a.w + num(m.mix.w), wk: a.wk + num(m.mix.wk) }), { g: 0, y: 0, o: 0, w: 0, wk: 0 });
   const p = mixPct(mix);
   const chips = plan.days.map((d, i) => { const dt = addDays(plan.start, i); const D = new Date(dt + 'T12:00:00');
     return `<button data-act="planday" data-i="${i}" aria-pressed="${i === di}">${D.toLocaleDateString('en-GB', { weekday: 'short' })}<small>${D.getDate()}</small></button>`; }).join('');
   body.innerHTML = `<div class="daychips" role="group" aria-label="Plan day">${chips}</div>
   <div class="card stack">
     <div class="row" style="justify-content:space-between;align-items:baseline"><h3>${new Date(addDays(plan.start, di) + 'T12:00:00').toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'short' })}</h3><span class="mono small"><b>${r0(tot.kcal)}</b> kcal · ${r0(tot.protein)}g protein · ${r0(tot.fibre)}g fibre</span></div>
-    ${p ? `<div class="mixbar" style="height:10px"><span class="g" style="width:${p.g}%"></span><span class="y" style="width:${p.y}%"></span><span class="o" style="width:${p.o}%"></span></div><span class="small muted"><span class="dot g"></span>${r0(p.g)}% light · <span class="dot y"></span>${r0(p.y)}% moderate · <span class="dot o"></span>${r0(p.o)}% dense</span>` : ''}
+    ${p ? `<div class="mixbar" style="height:10px"><span class="g" style="width:${p.g}%"></span><span class="y" style="width:${p.y}%"></span><span class="o" style="width:${p.o}%"></span></div><span class="small muted">${mixLine(mix)}</span>` : ''}
     <div>${day.meals.map((m, mi) => `<div class="pmeal">
       <div class="h"><span class="stack" style="gap:2px"><span class="eyebrow">${esc(m.type)}${m.mins ? ' · ' + r0(m.mins) + ' min' : ''}</span><b>${esc(m.name)}</b></span><span class="mono small" style="text-align:right;white-space:nowrap"><b>${r0(m.kcal)}</b> kcal<br><span class="muted">${r0(m.protein)}g protein</span></span></div>
       ${mixDots(m.mix) ? `<span class="small muted">${mixDots(m.mix)}</span>` : ''}
@@ -2639,7 +2688,7 @@ async function swapPlanMeal(di, mi, btn) {
   if (swapping) return;
   const plan = clone(currentPlan()), m = plan.days[di].meals[mi];
   const others = plan.days.flatMap(d => d.meals.map(x => x.name)).join('; ');
-  const prompt = `Suggest one replacement ${m.type.toLowerCase()} for a UK weight-loss meal plan. It must be about ${r0(m.kcal)} kcal (within 40), with at least ${r0(m.protein)} g protein, mostly light and moderate foods (light: under 1 kcal per gram; dense: over 2.4 kcal per gram), and different from the meal it replaces: "${m.name}".
+  const prompt = `Suggest one replacement ${m.type.toLowerCase()} for a UK weight-loss meal plan. It must be about ${r0(m.kcal)} kcal (within 40), with at least ${r0(m.protein)} g protein, mostly light and medium foods (light: under 1.5 kcal per gram as eaten; dense: over 4 kcal per gram), and different from the meal it replaces: "${m.name}".
 ${planContext()}
 Avoid repeating these meals already in the plan: ${others.slice(0, 2000)}
 At most 7 ingredients with gram amounts and 3 short steps.
@@ -2933,6 +2982,7 @@ if ('serviceWorker' in navigator && location.protocol === 'https:') navigator.se
 setRin('photo'); setMin('plate');
 renderAll();
 ['#r-go', '#l-go', '#m-go', '#i-go', '#pl-go', '#rb-go'].forEach(s => $(s).disabled = true);
+document.querySelectorAll('[data-density-help]').forEach(el => { el.innerHTML = densityHelpHTML(); });
 initStore().then(() => { renderAll(); initSample(); takeShare(); });
 })();
 </script>
