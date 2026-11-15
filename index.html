@@ -202,6 +202,21 @@ textarea{min-height:84px;resize:vertical}
 .meal .sub{grid-column:1/-1;display:flex;gap:10px;align-items:center;flex-wrap:wrap;font-size:.84rem;color:var(--muted)}
 .linkbtn{border:0;background:none;color:var(--muted);text-decoration:underline;cursor:pointer;padding:4px 0;font-size:.84rem}
 .linkbtn.del{color:var(--beet)}
+.regs{display:flex;gap:8px;overflow-x:auto;scroll-snap-type:x proximity;margin:0 -16px;padding:2px 16px 6px;scrollbar-width:none}
+.regs::-webkit-scrollbar{display:none}
+.reg{flex:0 0 auto;width:min(68%,210px);scroll-snap-align:start;text-align:left;border:1px solid var(--line);background:var(--sunk);color:var(--ink);border-radius:14px;padding:10px 12px;cursor:pointer;display:flex;flex-direction:column;gap:4px;font:inherit;min-height:76px}
+.reg:active{background:var(--leaf-soft)}
+.reg .rn{font-weight:700;line-height:1.25;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.reg .rm{font-size:.8rem;color:var(--muted);margin-top:auto}
+.reg .rm b{color:var(--leaf);font-family:var(--f-mono);font-weight:600}
+.reg.more{width:auto;min-width:96px;align-items:center;justify-content:center;background:transparent;color:var(--leaf);font-weight:700}
+.cpday{border-top:1px solid var(--line);padding-top:12px}
+.cpday:first-child{border-top:0;padding-top:0}
+.cprow{display:grid;grid-template-columns:1fr auto;gap:2px 10px;align-items:center;padding:8px 0}
+.cprow .nm{font-weight:700;min-width:0;overflow-wrap:anywhere}
+.cprow .sm2{grid-column:1;font-size:.82rem;color:var(--muted)}
+.cprow .btn{grid-row:1/3;grid-column:2}
+.toast .tact{margin-left:12px;background:none;border:0;color:var(--leaf-soft);font-weight:700;text-decoration:underline;cursor:pointer;font:inherit;padding:4px}
 .chartbox svg{width:100%;height:auto;display:block}
 .steps{display:grid;gap:12px;counter-reset:s;margin:0;padding:0;list-style:none}
 .steps li{display:grid;grid-template-columns:30px 1fr;gap:10px;align-items:start}
@@ -656,7 +671,7 @@ a.btn{text-decoration:none}
     <!-- PROGRESS -->
     <section id="v-progress" class="stack" hidden></section>
   </main>
-  <p class="disclaim">Estimates only. Not medical or dietetic advice. <span class="mono">Version 19</span></p>
+  <p class="disclaim">Estimates only. Not medical or dietetic advice. <span class="mono">Version 20</span></p>
 </div>
 
 <nav class="tabs" aria-label="Sections">
@@ -758,6 +773,12 @@ a.btn{text-decoration:none}
         <button class="btn danger sm" id="wipe-2" hidden>Yes, delete everything</button>
       </div>
     </div>
+  </div>
+</div>
+<div class="scrim" id="rsheet" hidden>
+  <div class="sheet stack" role="dialog" aria-modal="true" aria-labelledby="rsheet-h">
+    <div class="row"><h2 id="rsheet-h" style="flex:1">Copy a meal</h2><button class="btn ghost sm" data-act="rclose">Done</button></div>
+    <div id="rsheet-body" class="stack"></div>
   </div>
 </div>
 <div class="toast" id="toast" role="status" hidden></div>
@@ -1437,7 +1458,15 @@ function dayTipHTML() {
 
 /* ---------- toast ---------- */
 let toastT;
-function toast(msg) { const t = $('#toast'); t.textContent = msg; t.hidden = false; clearTimeout(toastT); toastT = setTimeout(() => t.hidden = true, 3200); }
+function toast(msg, action) {
+  const t = $('#toast'); t.textContent = msg; t.hidden = false; clearTimeout(toastT);
+  if (action) {
+    const b = document.createElement('button'); b.className = 'tact'; b.textContent = action.label;
+    b.onclick = () => { t.hidden = true; clearTimeout(toastT); action.fn(); };
+    t.appendChild(b);
+  }
+  toastT = setTimeout(() => t.hidden = true, action ? 6000 : 3200);
+}
 
 /* ---------- TODAY ---------- */
 function renderToday() {
@@ -1505,15 +1534,18 @@ function renderToday() {
           <span class="mono">${m.cost ? gbp(m.cost) : 'no price'}${m.unpriced ? ' · ' + m.unpriced + ' unpriced' : ''}</span>
           <span class="mono">P ${r0(num(m.nut.protein))}g · C ${r0(num(m.nut.carbs))}g · F ${r0(num(m.nut.fat))}g</span>
           <button class="linkbtn" data-act="editmeal" data-id="${esc(m.id)}">Edit or add food</button>
+          ${isRegular(m) ? '' : `<button class="linkbtn" data-act="regpin" data-id="${esc(m.id)}">Save as a regular</button>`}
           <button class="linkbtn del" data-act="delmeal" data-id="${esc(m.id)}">Delete</button></div>
       </div>`; }).join('')}</div>` : `<p class="small muted">Nothing logged ${isToday ? 'yet today' : 'on this day'}. Tap a meal once it's logged to change it or add more food to it.</p>`}
+    ${regularStrip(day)}
     <p class="small muted" style="margin-bottom:-4px">Add a meal${isToday ? '' : ' for this day'}</p>
     <div class="quick">
       <button class="btn ghost sm" data-act="addmeal" data-m="plate">Photo</button>
       <button class="btn ghost sm" data-act="addmeal" data-m="text">Describe it</button>
       <button class="btn ghost sm" data-act="addmeal" data-m="barcode">Barcode</button>
       <button class="btn ghost sm" data-act="addmeal" data-m="out">Eaten out</button>
-    </div></div>`;
+    </div>
+    ${Object.values(S.meals).some(m => m.date !== day) ? `<button class="btn ghost sm block" data-act="copyfrom">Copy a meal from another day</button>` : ''}</div>`;
   if (!meals.length && !Object.keys(S.products).length && !Object.keys(S.meals).length) {
     html += `<div class="card stack"><h3>Get started</h3>
       <ol class="steps">
@@ -2481,6 +2513,153 @@ function maAddPantry() {
   addToMeal([{ name: p.name, grams: g, productId: p.id, per100: p.per100 }], `Added ${p.name}.`);
 }
 
+/* ---------- REGULAR MEALS + COPY FROM ANOTHER DAY (v20) ----------
+   Regular meals are worked out from the log: meals with (nearly) the same ingredients, or the same name,
+   logged on 2+ different days in the last 180 days. Glen can also save any meal as a regular
+   (settings.regPins) or hide one (settings.regHide); both hold meal signatures, so later logs of the
+   same meal follow the choice. Logging a regular copies its most recent version to the day being viewed. */
+const REG_DAYS = 180, REG_STOP = new Set('a an the of and with in on or fresh chopped sliced diced mixed raw cooked boiled plain organic large small medium whole handful pinch splash some few slice slices'.split(' '));
+function regIngKey(n) {
+  const w = String(n || '').toLowerCase().replace(/\(.*?\)/g, ' ').replace(/[^a-z\s]/g, ' ').split(/\s+/)
+    .filter(x => x && !REG_STOP.has(x)).map(x => x.length > 3 && x.endsWith('s') && !x.endsWith('ss') ? x.slice(0, -1) : x);
+  return w.slice(0, 2).join(' ');
+}
+function nameKey(n) { return String(n || '').toLowerCase().replace(/[^a-z\s]/g, ' ').replace(/\s+/g, ' ').trim(); }
+function mealKeys(m) {
+  const ings = (m.ingredients || []).filter(g => !g.portion || (m.ingredients || []).length > 1);
+  return [...new Set(ings.map(g => regIngKey(g.name)).filter(Boolean))].sort();
+}
+function mealSig(m) { const k = mealKeys(m); return k.length ? 'i:' + k.join('|') : 'n:' + nameKey(m.name); }
+function sameMeal(a, b) {
+  if (a.sig === b.sig) return true;
+  const n1 = nameKey(a.m.name), n2 = nameKey(b.m.name);
+  if (n1 && n1 === n2 && n1.length > 4) return true;
+  if (a.keys.length >= 2 && b.keys.length >= 2) {
+    const B = new Set(b.keys), inter = a.keys.filter(k => B.has(k)).length;
+    return inter / (a.keys.length + b.keys.length - inter) >= 0.6;
+  }
+  return false;
+}
+let regCache = null;
+function mealGroups() {
+  const stamp = Object.keys(S.meals).length + ':' + Object.values(S.meals).reduce((x, m) => Math.max(x, m.updatedAt || m.createdAt || 0), 0) + ':' + (S.settings.regPins || []).length + ':' + (S.settings.regHide || []).length;
+  if (regCache && regCache.stamp === stamp) return regCache.groups;
+  const from = addDays(iso(new Date()), -REG_DAYS);
+  const list = Object.values(S.meals).filter(m => m.date >= from && num(m.nut && m.nut.kcal) > 0)
+    .sort((a, b) => b.date.localeCompare(a.date) || (b.createdAt || 0) - (a.createdAt || 0));
+  const groups = [], bySig = {};
+  for (const m of list) {
+    const e = { m, sig: mealSig(m), keys: mealKeys(m) };
+    const g = bySig[e.sig] || groups.find(g => sameMeal(g.head, e));
+    if (g) { g.items.push(e); g.days.add(m.date); g.sigs.add(e.sig); }
+    else groups.push({ head: e, items: [e], days: new Set([m.date]), sigs: new Set([e.sig]) });
+    bySig[e.sig] = g || groups[groups.length - 1];
+  }
+  const pins = new Set(S.settings.regPins || []), hide = new Set(S.settings.regHide || []);
+  for (const g of groups) {
+    g.id = g.head.m.id; g.pinned = [...g.sigs].some(s => pins.has(s)); g.hidden = [...g.sigs].some(s => hide.has(s));
+    const types = {}; g.items.forEach(e => types[e.m.type] = (types[e.m.type] || 0) + 1);
+    g.type = Object.entries(types).sort((a, b) => b[1] - a[1])[0][0];
+  }
+  regCache = { stamp, groups, bySig };
+  return groups;
+}
+function regulars(withHidden) {
+  const now = mealTypeNow();
+  return mealGroups().filter(g => (g.days.size >= 2 || g.pinned) && (withHidden || !g.hidden))
+    .sort((a, b) => (b.type === now) - (a.type === now) || b.days.size - a.days.size || (b.head.m.date).localeCompare(a.head.m.date));
+}
+function isRegular(m) { mealGroups(); const g = regCache.bySig[mealSig(m)]; return !!g && (g.days.size >= 2 || g.pinned) && !g.hidden; }
+function regularStrip(day) {
+  const regs = regulars();
+  if (!regs.length) return '';
+  const shown = regs.slice(0, 8);
+  return `<div class="stack" style="gap:8px">
+    <div class="row" style="justify-content:space-between"><p class="small muted" style="margin:0">Your regular meals · tap to add${day === iso(new Date()) ? '' : ' to this day'}</p>
+    <button class="linkbtn" data-act="regall">See all</button></div>
+    <div class="regs" role="list">${shown.map(g => { const m = g.head.m; return `<button class="reg" role="listitem" data-act="reglog" data-id="${esc(m.id)}" aria-label="Add ${esc(m.name)}, ${r0(num(m.nut.kcal))} kcal">
+      <span class="rn">${esc(m.name)}</span>
+      <span class="rm"><b>${r0(num(m.nut.kcal))} kcal</b> · ${esc(g.type || '')}${g.days.size > 1 ? ` · ${g.days.size} days` : ''}</span></button>`; }).join('')}
+      ${regs.length > shown.length ? `<button class="reg more" data-act="regall">All ${regs.length}</button>` : ''}</div>
+  </div>`;
+}
+function copyOf(m, date, i) {
+  const c = clone(m);
+  c.id = newId(); c.date = date; c.createdAt = Date.now() + (i || 0); c.copiedFrom = m.id;
+  delete c.updatedAt;
+  return c;
+}
+async function addCopies(src, date) {
+  const made = [];
+  for (let i = 0; i < src.length; i++) { const c = copyOf(src[i], date, i); await put('meals', c); made.push(c); }
+  renderAll();
+  if (!$('#rsheet').hidden) renderCopySheet();
+  const kcal = made.reduce((a, c) => a + num(c.nut && c.nut.kcal), 0);
+  const where = date === iso(new Date()) ? 'today' : 'to ' + dayLabel(date);
+  toast(`${made.length === 1 ? made[0].name : made.length + ' meals'} added ${where}: ${r0(kcal)} kcal.`, {
+    label: 'Undo', fn: async () => { for (const c of made) await remove('meals', c.id); renderAll(); if (!$('#rsheet').hidden) renderCopySheet(); toast('Removed.'); }
+  });
+  return made;
+}
+function logRegular(id) { const m = S.meals[id]; if (m) addCopies([m], S.day); }
+async function copyMeals(ids) {
+  const src = ids.map(id => S.meals[id]).filter(Boolean);
+  if (!src.length) return;
+  await addCopies(src, S.day);
+}
+async function regToggle(a, id) {
+  const m = S.meals[id]; if (!m) return;
+  mealGroups();
+  const g = regCache.bySig[mealSig(m)], sigs = g ? [...g.sigs] : [mealSig(m)];
+  const pins = new Set(S.settings.regPins || []), hide = new Set(S.settings.regHide || []);
+  if (a === 'regpin') { pins.add(mealSig(m)); sigs.forEach(s => hide.delete(s)); }
+  if (a === 'reghide') { sigs.forEach(s => { hide.add(s); pins.delete(s); }); }
+  if (a === 'regshow') { sigs.forEach(s => hide.delete(s)); }
+  S.settings.regPins = [...pins]; S.settings.regHide = [...hide];
+  await saveSettings();
+  renderAll();
+  if (!$('#rsheet').hidden) renderCopySheet();
+  toast(a === 'regpin' ? `${m.name} is now one of your regular meals.` : a === 'reghide' ? `${m.name} won't show in your regular meals.` : `${m.name} is back in your regular meals.`);
+}
+const rsheet = { mode: 'copy', days: 14 };
+function openCopySheet(mode) {
+  rsheet.mode = mode; rsheet.days = 14;
+  renderCopySheet();
+  $('#rsheet').hidden = false;
+  $('#rsheet .sheet').scrollTop = 0;
+}
+function closeCopySheet() { $('#rsheet').hidden = true; }
+function renderCopySheet() {
+  const day = S.day, to = day === iso(new Date()) ? 'today' : dayLabel(day);
+  const meta = m => `${r0(num(m.nut && m.nut.kcal))} kcal · ${esc(m.type || '')}${(m.ingredients || []).length > 1 ? ' · ' + esc(m.ingredients.map(g => g.name).join(', ')) : ''}`;
+  let h = '';
+  if (rsheet.mode === 'regs') {
+    $('#rsheet-h').textContent = 'Your regular meals';
+    const regs = regulars(true), on = regs.filter(g => !g.hidden), off = regs.filter(g => g.hidden);
+    h += `<p class="small muted">Meals you've logged on two or more days, or saved as a regular. Tap Add to put one in ${esc(to)}. You can change amounts afterwards by tapping the meal on Today.</p>`;
+    h += on.length ? `<div>${on.map(g => { const m = g.head.m; return `<div class="cprow"><span class="nm">${esc(m.name)}</span>
+      <span class="sm2">${meta(m)}<br>${g.days.size > 1 ? `Logged on ${g.days.size} days, last ${esc(dayLabel(m.date))}` : 'Saved as a regular'} · <button class="linkbtn" data-act="reghide" data-id="${esc(m.id)}">Not a regular</button></span>
+      <button class="btn sm" data-act="reglog" data-id="${esc(m.id)}">Add</button></div>`; }).join('')}</div>` : '<p class="small muted">No regular meals yet.</p>';
+    if (off.length) h += `<p class="eyebrow" style="margin:6px 0 0">Hidden</p><div>${off.map(g => { const m = g.head.m; return `<div class="cprow"><span class="nm">${esc(m.name)}</span><span class="sm2">${meta(m)}</span>
+      <button class="btn ghost sm" data-act="regshow" data-id="${esc(m.id)}">Show again</button></div>`; }).join('')}</div>`;
+    h += `<button class="btn ghost sm block" data-act="copyfrom">Copy from another day instead</button>`;
+  } else {
+    $('#rsheet-h').textContent = 'Copy a meal to ' + to;
+    const days = [];
+    const today = iso(new Date());
+    for (let d = today; d >= addDays(day, -rsheet.days); d = addDays(d, -1)) { if (d === day) continue; const ms = mealsOn(d); if (ms.length) days.push([d, ms]); }
+    h += `<p class="small muted">Tap Copy to add the same meal ${day === iso(new Date()) ? 'today' : 'to ' + esc(fmtDayLong(day))}. You can change amounts afterwards by tapping it on Today.</p>`;
+    h += days.length ? days.map(([d, ms]) => `<div class="cpday stack" style="gap:2px">
+      <div class="row" style="justify-content:space-between"><h3 style="margin:0">${esc(dayLabel(d))}</h3>${ms.length > 1 ? `<button class="btn ghost sm" data-act="cpday" data-d="${d}">Copy all ${ms.length}</button>` : ''}</div>
+      ${ms.map(m => `<div class="cprow"><span class="nm">${esc(m.name)}</span><span class="sm2">${meta(m)}</span>
+        <button class="btn sm" data-act="cpmeal" data-id="${esc(m.id)}">Copy</button></div>`).join('')}</div>`).join('')
+      : `<p class="small muted">No other days with meals in the last ${rsheet.days} days.</p>`;
+    h += `<button class="btn ghost sm block" data-act="rmore">Show older days</button>`;
+    if (regulars().length) h += `<button class="btn ghost sm block" data-act="regall">Pick from your regular meals</button>`;
+  }
+  $('#rsheet-body').innerHTML = h;
+}
+
 /* meal sheet: the Log a meal panel shown over Today, for adding or editing a meal without leaving the page */
 function mealSheetOpen() { return !$('#msheet').hidden; }
 function openMealSheet(title) {
@@ -3386,6 +3565,14 @@ document.addEventListener('click', async e => {
   if (a === 'logmeal') { go('scan'); setScan('meal'); return; }
   if (a === 'addmeal') return addMealFrom(t.dataset.m);
   if (a === 'editmeal') return editMeal(t.dataset.id);
+  if (a === 'copyfrom') return openCopySheet('copy');
+  if (a === 'regall') return openCopySheet('regs');
+  if (a === 'rclose') return closeCopySheet();
+  if (a === 'rmore') { rsheet.days += 14; return renderCopySheet(); }
+  if (a === 'reglog') return logRegular(t.dataset.id);
+  if (a === 'cpmeal') return copyMeals([t.dataset.id], t);
+  if (a === 'cpday') return copyMeals(mealsOn(t.dataset.d).map(m => m.id), t);
+  if (a === 'regpin' || a === 'reghide' || a === 'regshow') return regToggle(a, t.dataset.id);
   if (a === 'delmeal') {
     const m = S.meals[t.dataset.id];
     if (mealSheetOpen() && !confirm(`Delete ${m ? m.name : 'this meal'}?`)) return;
@@ -3499,6 +3686,7 @@ $('#r-go').onclick = readReceipt;
 $('#l-go').onclick = readLabel;
 $('#m-go').onclick = estimateMeal;
 $('#msheet-close').onclick = closeMealSheet;
+$('#rsheet').addEventListener('click', e => { if (e.target.id === 'rsheet') closeCopySheet(); });
 $('#msheet').addEventListener('click', e => { if (e.target.id === 'msheet') closeMealSheet(); });
 document.addEventListener('keydown', e => {
   if (e.key === 'Escape' && mealSheetOpen()) return closeMealSheet();
