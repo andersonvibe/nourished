@@ -350,6 +350,9 @@ details[open] summary{margin-bottom:10px}
 .dread{min-height:1.3em;color:var(--ink)}
 .dbar{height:8px;border-radius:99px;background:var(--line);overflow:hidden}.dbar span{display:block;height:100%;background:var(--leaf);border-radius:99px}
 .dstack{display:flex;gap:2px;height:14px;border-radius:99px;overflow:hidden;background:var(--line)}
+.dtip{display:flex;flex-direction:column;gap:4px;border-left:3px solid var(--olive);padding:2px 0 2px 12px}
+.dtip a{color:inherit}
+.dswap{background:var(--sunk);border-radius:12px;padding:10px 12px;display:flex;flex-direction:column;gap:2px}
 .dleg{display:flex;flex-wrap:wrap;gap:6px 14px;font-size:.84rem;color:var(--muted)}
 .dleg i{display:inline-block;width:10px;height:10px;border-radius:3px;margin-right:6px;vertical-align:-1px}
 .dleg b{color:var(--ink);font-weight:500}
@@ -2027,7 +2030,8 @@ function dashData(range, meal) {
     const all = sum(ms, 'kcal'), pick = meal === 'all' ? ms : ms.filter(m => m.type === meal);
     const split = {}; for (const m of ms) { const t = ['Breakfast', 'Lunch', 'Dinner'].includes(m.type) ? m.type : 'Snack'; split[t] = (split[t] || 0) + num(m.nut && m.nut.kcal); }
     const mix = { g: 0, y: 0, o: 0 }; for (const m of ms) { const x = mealMix(m); mix.g += num(x.g); mix.y += num(x.y); mix.o += num(x.o); }
-    return { d, logged: ms.length > 0, full: ms.length > 0 && all >= tg * 0.5, all, kcal: sum(pick, 'kcal'), tg, protein: sum(ms, 'protein'), fibre: sum(ms, 'fibre'), split, mix };
+    const pm = {}; for (const m of ms) pm[m.type] = (pm[m.type] || 0) + num(m.nut && m.nut.protein);
+    return { d, ms, logged: ms.length > 0, full: ms.length > 0 && all >= tg * 0.5, all, kcal: sum(pick, 'kcal'), tg, protein: sum(ms, 'protein'), fibre: sum(ms, 'fibre'), sat: sum(ms, 'sat'), sugars: sum(ms, 'sugars'), salt: sum(ms, 'salt'), split, mix, pm };
   };
   const days = []; for (let i = n; i >= 1; i--) days.push(dayInfo(addDays(today, -i)));
   const prev = []; for (let i = 2 * n; i > n; i--) prev.push(dayInfo(addDays(today, -i)));
@@ -2057,12 +2061,22 @@ function dashData(range, meal) {
   const split = {}; for (const x of full) for (const k in x.split) split[k] = (split[k] || 0) + x.split[k];
   const mix = full.reduce((a, x) => ({ g: a.g + x.mix.g, y: a.y + x.mix.y, o: a.o + x.mix.o }), { g: 0, y: 0, o: 0 });
   const pTg = proteinTarget(), pf = prev.filter(x => x.full);
+  // the foods logged on fully logged days, grouped by name (per portion), for suggestions and Claude's swaps
+  const foods = {};
+  for (const x of full) for (const m of x.ms) {
+    const key = String(m.name || '').trim().toLowerCase(); if (!key) continue;
+    const f = foods[key] = foods[key] || { name: String(m.name).trim().slice(0, 80), type: m.type || 'Meal', n: 0, kcal: 0, protein: 0, fibre: 0, sat: 0, sugars: 0, salt: 0, o: 0 };
+    f.n++; ['kcal', 'protein', 'fibre', 'sat', 'sugars', 'salt'].forEach(k => f[k] += num(m.nut && m.nut[k])); const mx = mealMix(m); f.o += num(mx.o);
+  }
+  for (const f of Object.values(foods)) { f.dense = f.kcal ? f.o / f.kcal : 0; ['kcal', 'protein', 'fibre', 'sat', 'sugars', 'salt'].forEach(k => f[k] /= f.n); }
+  const denseMeals = Object.values(foods).filter(f => f.dense > 0.5 && f.kcal >= 150).sort((a, b) => b.n * b.kcal * b.dense - a.n * a.kcal * a.dense).map(f => f.name);
   return {
     n, range, meal, days, full, pts, start, end,
     avgKcal: avg(full, 'kcal'), prevKcal: avg(pf, 'kcal'), avgTg: avg(full, 'tg'),
     onTarget: full.filter(x => x.all <= x.tg).length, partly: days.filter(x => x.logged && !x.full).length,
     protein: avg(full, 'protein'), pTg, pDays: full.filter(x => x.protein >= pTg).length,
     fibre: avg(full, 'fibre'), fDays: full.filter(x => x.fibre >= FIBRE_TARGET).length,
+    sat: avg(full, 'sat'), sugars: avg(full, 'sugars'), salt: avg(full, 'salt'), foods, denseMeals,
     minsWk: mins / weeks, strengthWk: strength.size / weeks, wChange, wCount: wl.length, streak,
     split: Object.fromEntries(Object.entries(split).map(([k, v]) => [k, v / full.length])), mix
   };
@@ -2094,6 +2108,7 @@ function dashHTML() {
     ${tile('Logging streak', `${D.streak}<small> day${D.streak === 1 ? '' : 's'}</small>`, D.streak >= 7 ? 'keep it going' : 'days in a row with a meal')}
   </div>`;
   html += kcalChart(D);
+  html += dashTipsHTML(meal === 'all' ? D : dashData(range, 'all'));
   // protein, fibre, activity, weight
   const meter = (lab, val, tg, unit, days, src) => {
     const pct = Math.min(100, val / tg * 100), ok = val >= tg;
@@ -2124,6 +2139,120 @@ function dashHTML() {
     </div>`;
   }
   return html + '</div>';
+}
+/* ---------- suggestions: what the dashboard's numbers say to work on ---------- */
+// Each suggestion is worked out from the range's fully logged days, says why (your numbers), what to try, and
+// names its source. Only advice backed by NHS/UK guidance or peer-reviewed reviews (see GUIDE_SRC) goes here.
+const SUGGEST_SRC = {
+  leidy: ['Leidy HJ et al. The role of protein in weight loss and maintenance. Am J Clin Nutr 2015;101:1320S-1329S.', PM('Leidy role of protein in weight loss and maintenance 2015')],
+  nhsFat: ['NHS. Fat: the facts (reviewed 2023).', 'https://www.nhs.uk/live-well/eat-well/food-types/different-fats-nutrition/'],
+  nhsSugar: ['NHS. Sugar: the facts (reviewed 2023).', 'https://www.nhs.uk/live-well/eat-well/food-types/how-does-sugar-in-our-diet-affect-our-health/'],
+  nhsSalt: ['NHS. Salt: the facts (reviewed 2024).', 'https://www.nhs.uk/live-well/eat-well/food-types/salt-nutrition/']
+};
+const suggestSrc = k => SUGGEST_SRC[k] || GUIDE_SRC[k];
+function dashTips(D) {
+  const out = [], F = D.full, n = F.length, k = v => r0(v).toLocaleString('en-GB');
+  if (n < 3) return out;
+  const avgOf = (list, f) => list.length ? list.reduce((a, x) => a + f(x), 0) / list.length : 0;
+  const MEALS = ['Breakfast', 'Lunch', 'Dinner', 'Snack'], mName = m => m === 'Snack' ? 'snacks' : m.toLowerCase();
+  // 1. going over: which meal grows on the over days?
+  const over = F.filter(x => x.all > x.tg), ok = F.filter(x => x.all <= x.tg);
+  if (over.length / n > 0.3) {
+    let worst = null, wd = 0;
+    for (const m of MEALS) { const d = avgOf(over, x => x.split[m] || 0) - avgOf(ok.length ? ok : F, x => x.split[m] || 0); if (d > wd) { wd = d; worst = m; } }
+    out.push({ pri: 90, title: `You went over on ${over.length} of ${n} days`,
+      why: `On those days you ate ${k(avgOf(over, x => x.all - x.tg))} kcal over on average${worst && wd > 80 ? `, and most of the extra came at ${mName(worst)} (${k(wd)} kcal more than on your on-target days)` : ''}.`,
+      fix: worst === 'Snack' ? 'Plan your snacks: keep a filling one ready (fruit, skyr, a small handful of nuts) so you\'re not reaching for whatever is nearby.'
+        : `Plan ${worst ? mName(worst) : 'your biggest meal'} ahead, fill half the plate with veg or salad, and serve the dense parts (pasta, rice, cheese, sauces) in a measured portion.`,
+      src: ['nhsTips', 'rolls'] });
+  }
+  // 2. protein: which main meal is lightest on it?
+  if (D.protein < D.pTg * 0.9) {
+    const per = ['Breakfast', 'Lunch', 'Dinner'].map(m => [m, avgOf(F, x => x.pm[m] || 0)]).sort((a, b) => a[1] - b[1]);
+    out.push({ pri: 80, title: `Protein is ${k(D.pTg - D.protein)} g a day short`,
+      why: `You average ${k(D.protein)} g of your ${D.pTg} g. ${per[0][0]} is your lowest main meal at ${k(per[0][1])} g; about ${r0(D.pTg * 0.28)} g at each main meal gets you there.`,
+      fix: `Add protein to ${mName(per[0][0])}: ${TIP_FOODS.protein}. Protein keeps you fuller for longer and helps keep muscle while you lose fat.`,
+      src: ['leidy'] });
+  }
+  // 3. fibre
+  if (D.fibre < 27) out.push({ pri: 70, title: `Fibre is ${k(30 - D.fibre)} g a day short`,
+    why: `You average ${k(D.fibre)} g against the UK's 30 g.`,
+    fix: `Swap white bread, pasta and rice for wholegrain, and add beans, lentils, chickpeas, porridge oats, berries or an extra portion of veg. Fibre fills you up and helps keep cholesterol down.`, src: ['sacn'] });
+  // 4. calorie-dense food
+  const mixT = D.mix.g + D.mix.y + D.mix.o, dense = mixT ? D.mix.o / mixT : 0;
+  if (dense > 0.3) out.push({ pri: 65, title: `${r0(dense * 100)}% of your calories come from dense foods`,
+    why: D.denseMeals.length ? `The most calorie-dense things you log often: ${D.denseMeals.slice(0, 3).map(esc).join(', ')}.` : 'Dense foods (over 4 kcal a gram) pack a lot of calories into a small amount.',
+    fix: 'Keep the meals you like but change the balance: more veg, beans and salad, less cheese, crisps, pastry and creamy sauce. Swap crisps for popcorn or fruit, cream for yoghurt, and pastry tops for mash or filo.',
+    src: ['rolls'] });
+  // 5. saturated fat, sugars, salt against the UK reference intakes
+  if (D.sat > RI.sat) out.push({ pri: 60, title: `Saturated fat averages ${k(D.sat)} g a day`,
+    why: `That's over the 20 g daily reference. It's linked with higher cholesterol.`,
+    fix: 'Use a strong cheese so you need less, swap butter for an olive or rapeseed spread, cream for yoghurt or crème fraîche, and pastries and biscuits for fruit or oatcakes.', src: ['nhsFat'] });
+  if (D.sugars > RI.sugars) out.push({ pri: 50, title: `Sugars average ${k(D.sugars)} g a day`,
+    why: 'That\'s over the 90 g daily reference for total sugars.',
+    fix: 'Swap sugary drinks and juice for water or sugar-free versions, sweetened cereal for porridge or plain wholegrain, and flavoured yoghurt for plain with fruit.', src: ['nhsSugar'] });
+  if (D.salt > RI.salt) out.push({ pri: 45, title: `Salt averages ${r1(D.salt)} g a day`,
+    why: 'That\'s over the 6 g a day limit for adults.',
+    fix: 'Ready meals, sauces, stock, cheese and bread add up. Choose reduced-salt stock and sauces, and season with herbs, spices, lemon or vinegar.', src: ['nhsSalt'] });
+  // 6. snacks
+  const snack = avgOf(F, x => x.split.Snack || 0), avgAll = avgOf(F, x => x.all);
+  if (avgAll && snack / avgAll > 0.2) out.push({ pri: 55, title: `Snacks are ${r0(snack / avgAll * 100)}% of your calories`,
+    why: `About ${k(snack)} kcal a day comes from snacks.`,
+    fix: 'Switch to snacks that fill you up for fewer calories: fruit, skyr or Greek yoghurt, edamame, veg sticks with hummus, or plain popcorn.', src: ['rolls', 'nhsTips'] });
+  // 7. weekends
+  const we = F.filter(x => [0, 6].includes(new Date(x.d + 'T12:00:00').getDay())), wk = F.filter(x => ![0, 6].includes(new Date(x.d + 'T12:00:00').getDay()));
+  if (we.length >= 2 && wk.length >= 3) { const d = avgOf(we, x => x.all) - avgOf(wk, x => x.all); if (d > 250) out.push({ pri: 58, title: `Weekends run ${k(d)} kcal a day higher`,
+    why: `You average ${k(avgOf(wk, x => x.all))} kcal on weekdays and ${k(avgOf(we, x => x.all))} at weekends.`,
+    fix: 'Plan one weekend treat meal and enjoy it, and keep the rest of the weekend like a weekday. Log as you go so it doesn\'t creep up.', src: ['nhsTips'] }); }
+  // 8. activity
+  if (D.minsWk < 150) out.push({ pri: 40, title: `${r0(D.minsWk)} active minutes a week`,
+    why: 'The UK guideline is 150 minutes of moderate activity a week, plus strength work on 2 days.',
+    fix: 'Add a brisk 10 to 15 minute walk after a meal on most days. Short bouts all count.', src: ['cmo', 'nhsAct'] });
+  return out.sort((a, b) => b.pri - a.pri);
+}
+function dashTipsHTML(D) {
+  const tips = dashTips(D), sw = S.settings.dashSwaps;
+  const refs = keys => keys.map(k => suggestSrc(k)).filter(Boolean).map(([t, u]) => `<a href="${u}" target="_blank" rel="noopener">${esc(t.split(/[.:(]/)[0])}</a>`).join(', ');
+  let html = `<div class="card stack" id="dash-tips"><div><h3>What to work on</h3><p class="small muted">From your last ${D.n} days of logging, biggest wins first.</p></div>`;
+  if (D.full.length < 3) html += `<p class="small">Log a few more full days and suggestions will show here.</p>`;
+  else if (!tips.length) html += `<p><b class="good">You're on track.</b> Calories, protein, fibre, saturated fat, sugar and salt all look good over this ${D.range}. Keep doing what you're doing.</p>`;
+  else html += tips.slice(0, S.tipsAll ? 9 : 3).map(t => `<div class="dtip"><b>${esc(t.title)}</b><p class="small">${t.why}</p><p class="small"><span class="eyebrow" style="color:var(--leaf)">Try</span> ${esc(t.fix)}</p><p class="small muted">Source: ${refs(t.src)}</p></div>`).join('')
+    + (tips.length > 3 ? `<button class="linkbtn" data-act="tipsall">${S.tipsAll ? 'Show fewer' : `Show ${tips.length - 3} more`}</button>` : '');
+  // personal swaps from Claude, based on the foods actually logged
+  html += `<div class="stack" style="gap:8px;border-top:1px solid var(--line);padding-top:12px"><b>Swaps for the foods you eat</b>`;
+  if (sw && sw.items && sw.items.length) {
+    html += sw.items.map(s => `<div class="dswap"><p><span class="muted">Instead of</span> <b>${esc(s.from)}</b></p><p><span class="muted">try</span> <b>${esc(s.to)}</b></p>
+      <p class="small mono">${[s.kcal ? `${s.kcal > 0 ? '−' : '+'}${Math.abs(r0(s.kcal))} kcal` : '', s.protein ? `${s.protein > 0 ? '+' : '−'}${Math.abs(r0(s.protein))} g protein` : '', s.fibre ? `${s.fibre > 0 ? '+' : '−'}${Math.abs(r0(s.fibre))} g fibre` : ''].filter(Boolean).join(' · ')}</p>
+      ${s.why ? `<p class="small muted">${esc(s.why)}</p>` : ''}</div>`).join('')
+      + `<p class="small muted">Suggested ${fmtDate(sw.day)} from your last ${esc(sw.label)}. Claude's estimates, so treat numbers as a guide.</p>`;
+  } else html += `<p class="small muted">Claude can look at the meals you've logged and suggest better swaps for them. It uses your API key and costs about a penny or two.</p>`;
+  html += `<button class="btn ${sw ? 'ghost ' : ''}sm" data-act="dswaps" ${D.full.length < 3 ? 'disabled' : ''}>${sw ? 'Suggest new swaps' : 'Suggest swaps from my meals'}</button><p class="small" id="dswap-st" aria-live="polite"></p></div>`;
+  return html + '</div>';
+}
+let swapBusy = false;
+async function dashSwaps(btn) {
+  if (swapBusy) return;
+  const D = dashData(S.dashRange || 'month', 'all');
+  const foods = Object.values(D.foods).sort((a, b) => b.kcal * b.n - a.kcal * a.n).slice(0, 40)
+    .map(f => `${f.name} (${f.type}, logged ${f.n}x): ${r0(f.kcal)} kcal, ${r0(f.protein)} g protein, ${r0(f.fibre)} g fibre, ${r1(f.sat)} g sat fat, ${r0(f.sugars)} g sugars, ${r1(f.salt)} g salt, ${r0(f.dense * 100)}% of kcal from dense foods`).join('\n');
+  const issues = dashTips(D).map(t => t.title).join('; ') || 'none';
+  const prompt = `You are helping a UK adult lose weight steadily and eat better quality food. Diet: ${dietText()}.
+Targets: ${baseTarget()} kcal, ${D.pTg} g protein and 30 g fibre a day. Over the last ${D.n} days they averaged ${r0(D.avgKcal)} kcal, ${r0(D.protein)} g protein, ${r0(D.fibre)} g fibre, ${r1(D.sat)} g saturated fat, ${r0(D.sugars)} g sugars, ${r1(D.salt)} g salt; ${r0(D.mix.o / Math.max(1, D.mix.g + D.mix.y + D.mix.o) * 100)}% of calories from energy-dense foods (over 4 kcal/g).
+What to work on: ${issues}.
+Foods and meals they logged (per portion as eaten):
+${foods}
+
+Suggest up to 6 swaps for foods ON THIS LIST, biggest wins first, aimed at what to work on. Each swap replaces one logged food or ingredient with a realistic UK supermarket alternative that fits their diet and keeps the meal enjoyable (same kind of meal, similar effort). Base the reasons only on established guidance: NHS Eatwell, SACN 30 g fibre, UK reference intakes (sat fat 20 g, sugars 90 g, salt 6 g), energy density (lighter foods fill you up for fewer calories), protein for fullness and keeping muscle. No supplements, no medical claims, no cutting out whole food groups, never suggest eating less than a normal meal.
+Reply with ONLY a JSON array: [{"from": the logged food, "to": the swap, "why": one short plain sentence, "kcal": kcal saved per portion (negative if it adds), "protein": g protein gained (negative if lost), "fibre": g fibre gained}]`;
+  const st = $('#dswap-st'); swapBusy = true; btn.disabled = true; btn.textContent = 'Looking at your meals…';
+  try {
+    const res = await ask(prompt, null, { maxTokens: 4000 });
+    const items = (Array.isArray(res) ? res : []).filter(s => s && s.from && s.to).slice(0, 6).map(s => ({ from: String(s.from).slice(0, 120), to: String(s.to).slice(0, 160), why: String(s.why || '').slice(0, 240), kcal: num(s.kcal), protein: num(s.protein), fibre: num(s.fibre) }));
+    if (!items.length) throw { code: 'empty_completion' };
+    S.settings.dashSwaps = { day: iso(new Date()), label: (DASH_RANGES.find(r => r[0] === D.range) || [, 'month'])[1].toLowerCase(), items };
+    await saveSettings();
+  } catch (e) { swapBusy = false; btn.disabled = false; btn.textContent = 'Try again'; if (st) st.textContent = errMsg(e); return; }
+  swapBusy = false; const y = window.scrollY; renderProgress(); window.scrollTo(0, y);
 }
 function kcalChart(D) {
   const pts = D.pts, showTg = D.meal === 'all';
@@ -3994,6 +4123,8 @@ document.addEventListener('click', async e => {
   if (t.dataset.pf) { S.pantryFilter = t.dataset.pf; return renderPantry(); }
   const a = t.dataset.act;
   if (!a && t.dataset.tab) return go(t.dataset.tab);
+  if (a === 'dswaps') return dashSwaps(t);
+  if (a === 'tipsall') { S.tipsAll = !S.tipsAll; const y = window.scrollY; renderProgress(); window.scrollTo(0, y); return; }
   if (a === 'drange' || a === 'dmeal') { if (a === 'drange') S.dashRange = t.dataset.v; else S.dashMeal = t.dataset.v; const y = window.scrollY; renderProgress(); window.scrollTo(0, y); return; }
   if (a === 'reminder') { S.settings.reminderSet = true; saveSettings(); setTimeout(renderHome, 800); return; }
   if (a === 'menu') {
