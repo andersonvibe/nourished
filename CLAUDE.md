@@ -17,7 +17,7 @@ Glen Anderson's own Noom-style weight-loss and nutrition app (formerly "Basket t
 
 ## Releasing a change
 1. Edit `index.html`.
-2. Bump the footer label `<span class="mono">Version N</span>` (search for `Version `) and `VERSION` in `sw.js` (`nourished-vN`) to the same N. Current: **15**.
+2. Bump the footer label `<span class="mono">Version N</span>` (search for `Version `) and `VERSION` in `sw.js` (`nourished-vN`) to the same N. Current: **16**.
 3. Syntax-check the main script (extract the last `<script>` block and run `node --check`).
 4. Test headlessly with Playwright (Chromium is at `/opt/pw-browsers/chromium`): serve files via `page.route`, stub `https://api.anthropic.com/v1/messages` (responses are **streamed SSE**) and `world.openfoodfacts.org`.
 5. Commit and push. Glen closes and reopens the app to pick it up and can confirm the version number at the bottom of the Home screen.
@@ -39,6 +39,7 @@ Glen Anderson's own Noom-style weight-loss and nutrition app (formerly "Basket t
 - **Own recipes first:** "What can I make?" matches saved recipes locally (`matchMine()`, ingredient word overlap) and shows them above web results; with 3+ strong matches it skips the web search until Glen taps "Also search recipe sites". Recipe ideas (`bookForPrompt()`) and meal plans (`planContext()`) send the saved recipes to Claude and ask it to use them first.
 - **Pantry filter and sort (v13):** products have no category, expiry or quantity, so the Pantry tab sorts by name, last bought, date added, price per kg, pack price, and per-100g calories/protein/sugar/fibre (`PANTRY_SORTS`, `sortPantry()`; products missing the value go last; choice saved as `settings.pantrySort`). Filter chips (`PANTRY_FILTERS`, one at a time): Needs label, No price, High protein (≥20% of kcal from protein, the EU/UK claim rule), Low sugar / sat fat / salt (green traffic light). A Shop dropdown appears when products have a store. Search also matches the plain `generic` name.
 - **Pantry categories (v15):** `CATS` (Dairy & eggs, Meat, Fish & seafood, Meat-free & tofu, Fruit, Veg, Bread & bakery, Frozen, Tins, Jars sauces & dips, Cupboard, Snacks & treats, Drinks, Miscellaneous). `catOf(p)` uses `p.cat` if set, else `guessCat()` keyword rules (`CAT_RULES`, first match wins, so order matters) on the generic name + name; nothing is migrated. Receipt scans ask Claude for a `category` and store it on new products (or ones with none). Glen can change it in the product's Edit form. Pantry has a Category dropdown (with counts) and a Category sort that shows headings.
+- **Calendar (v16):** Today's date heading opens a month calendar (`calendarCard()`, `S.calOpen`, `S.calMonth`; weeks start Monday, future days disabled). Each day shows logged kcal and dots for food on/over target, exercise and weigh-ins. Tapping a day (`pickday`) sets `S.day`, so Today shows that day and every add/edit there (meals, exercise, screenshot import) saves to it; a banner with "Back to today" shows on past days. The 7-day chart bars are tappable too.
 - **Units:** height ft/in or cm; weight kg, lb, or st+lb (`wUnit()`, `fmtW()`, `wInputHTML()`); stored internally as kg/cm.
 - **Plain shopping names:** receipts store a `generic` name; "Add my recent shopping" asks Claude once per product for any without one (`plainNames()`), with an offline `roughName()` fallback.
 

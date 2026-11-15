@@ -151,7 +151,35 @@ textarea{min-height:84px;resize:vertical}
 
 /* today */
 .daynav{display:flex;align-items:center;gap:8px}
-.daynav h2{flex:1;text-align:center;font-size:1.1rem}
+.daynav h2{flex:1;text-align:center;font-size:1.1rem;margin:0}
+.daynav .dayhd{flex:1;display:flex;align-items:center;justify-content:center;gap:8px;border:0;background:none;color:var(--ink);cursor:pointer;padding:6px;border-radius:10px;font:inherit}
+.daynav .dayhd h2{flex:none}
+.daynav .dayhd svg{width:18px;height:18px;fill:none;stroke:var(--leaf);stroke-width:1.8;flex:none}
+.daynav .dayhd .chev{width:14px;height:14px;stroke:var(--muted);transition:transform .15s}
+.daynav .dayhd[aria-expanded="true"] .chev{transform:rotate(180deg)}
+.cal-head{display:flex;align-items:center;gap:8px}
+.cal-head h3{flex:1;text-align:center;margin:0}
+.cal-grid{display:grid;grid-template-columns:repeat(7,1fr);gap:4px}
+.cal-grid .wd{text-align:center;font-size:.72rem;color:var(--muted);padding-bottom:2px}
+.cal-day{aspect-ratio:1/1.08;min-width:0;border:1px solid transparent;background:var(--sunk);border-radius:10px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;cursor:pointer;color:var(--ink);font:inherit;padding:0}
+.cal-day .n{font-family:var(--f-mono);font-size:.86rem;line-height:1}
+.cal-day .k{font-family:var(--f-mono);font-size:.6rem;line-height:1;color:var(--muted);white-space:nowrap}
+.cal-day .mk{display:flex;gap:3px;height:6px}
+.cal-day .mk i{width:6px;height:6px;border-radius:50%;display:block}
+.cal-day .mk i.f{background:var(--leaf)}
+.cal-day .mk i.f.over{background:var(--tl-r)}
+.cal-day .mk i.x{background:var(--olive)}
+.cal-day .mk i.w{background:var(--muted)}
+.cal-day.empty{background:none;cursor:default}
+.cal-day.future{opacity:.35;cursor:default}
+.cal-day.today{border-color:var(--leaf)}
+.cal-day.sel{background:var(--leaf);color:var(--leaf-ink)}
+.cal-day.sel .k{color:var(--leaf-ink)}
+.cal-day.sel .mk i{box-shadow:0 0 0 1.5px var(--leaf-ink)}
+.cal-leg{display:flex;flex-wrap:wrap;gap:4px 14px;font-size:.78rem;color:var(--muted)}
+.cal-leg span{display:inline-flex;align-items:center;gap:5px}
+.cal-leg i{width:8px;height:8px;border-radius:50%;display:inline-block}
+.pastday{background:var(--olive-soft);border-radius:12px;padding:10px 12px;display:flex;align-items:center;justify-content:space-between;gap:10px;flex-wrap:wrap}
 .hero{display:grid;grid-template-columns:132px 1fr;gap:18px;align-items:center}
 @media (max-width:360px){.hero{grid-template-columns:1fr;justify-items:center}}
 .ring{position:relative;width:132px;height:132px}
@@ -623,7 +651,7 @@ a.btn{text-decoration:none}
     <!-- PROGRESS -->
     <section id="v-progress" class="stack" hidden></section>
   </main>
-  <p class="disclaim">Estimates only. Not medical or dietetic advice. <span class="mono">Version 15</span></p>
+  <p class="disclaim">Estimates only. Not medical or dietetic advice. <span class="mono">Version 16</span></p>
 </div>
 
 <nav class="tabs" aria-label="Sections">
@@ -756,7 +784,7 @@ const S = {
   mode: 'loading',
   settings: { kcal: 2000, diet: 'any', likes: '', dislikes: '', sex: 'm', age: null, heightCm: null, goalWeight: null, activity: 1.2, pace: 0.5, ownKcal: false, earnBack: 0.5, wUnit: 'kg', hUnit: 'ftin' },
   products: {}, meals: {}, receipts: {}, weights: {}, plans: {}, exercise: {}, recipes: {},
-  day: iso(new Date()), tab: 'home', pantryFilter: 'all', pantryQ: '', pantryStore: '', pantryCat: '', openProd: null, planDay: 0, planView: 'week'
+  day: iso(new Date()), calOpen: false, calMonth: null, tab: 'home', pantryFilter: 'all', pantryQ: '', pantryStore: '', pantryCat: '', openProd: null, planDay: 0, planView: 'week'
 };
 
 /* ---------- storage: everything lives on this phone ---------- */
@@ -1222,7 +1250,7 @@ function exerciseCard(day) {
   return `<div class="card stack" id="ex-card">
     <div class="row" style="justify-content:space-between"><h3>Exercise</h3>${tot ? `<span class="mono small">${r0(tot)} kcal burned</span>` : ''}</div>
     ${list.length ? `<div>${list.map(x => `<div class="exrow"><span>${esc(x.name)} <span class="muted small">· ${r0(num(x.mins))} min</span></span><span class="row" style="gap:12px"><b class="mono">${r0(num(x.kcal))} kcal</b><button class="linkbtn del" data-act="delex" data-id="${esc(x.id)}">Delete</button></span></div>`).join('')}</div>
-      <p class="small muted">${earnBack() > 0 ? `<b class="mono">+${earned} kcal</b> added to today's food allowance (${earnBack() === 1 ? 'all' : 'half'} of what you burned).` : `Not added to your food allowance, so it speeds up your weight loss.`}</p>` : `<p class="small muted">Log a walk, a gym session or a game of football. ${earnBack() > 0 ? `${earnBack() === 1 ? 'All' : 'Half'} of the calories go on top of your food allowance.` : 'It counts towards faster weight loss.'}</p>`}
+      <p class="small muted">${earnBack() > 0 ? `<b class="mono">+${earned} kcal</b> added to ${day === iso(new Date()) ? "today's" : "this day's"} food allowance (${earnBack() === 1 ? 'all' : 'half'} of what you burned).` : `Not added to your food allowance, so it speeds up your weight loss.`}</p>` : `<p class="small muted">Log a walk, a gym session or a game of football. ${earnBack() > 0 ? `${earnBack() === 1 ? 'All' : 'Half'} of the calories go on top of your food allowance.` : 'It counts towards faster weight loss.'}</p>`}
     ${exShotHTML(day)}
     <div class="exform">
       <label class="f wide">Activity<select id="ex-type">${EX.map(e => `<option value="${e[0]}">${esc(e[1])}</option>`).join('')}</select></label>
@@ -1365,9 +1393,15 @@ function renderToday() {
   let html = `
   <div class="daynav">
     <button class="iconbtn" data-act="day" data-n="-1" aria-label="Previous day"><svg viewBox="0 0 24 24"><path d="M15 6l-6 6 6 6"/></svg></button>
-    <h2>${esc(dayLabel(day))}</h2>
+    <button class="dayhd" data-act="cal" aria-expanded="${S.calOpen}" aria-controls="cal-card" aria-label="${esc(dayLabel(day))}. ${S.calOpen ? 'Close' : 'Open'} the calendar">
+      <svg viewBox="0 0 24 24"><rect x="3.5" y="5" width="17" height="15" rx="2.5"/><path d="M3.5 10h17M8 3v4M16 3v4"/></svg>
+      <h2>${esc(dayLabel(day))}</h2>
+      <svg class="chev" viewBox="0 0 24 24"><path d="M6 9l6 6 6-6"/></svg>
+    </button>
     <button class="iconbtn" data-act="day" data-n="1" aria-label="Next day" ${isToday ? 'disabled style="opacity:.35"' : ''}><svg viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></button>
   </div>
+  ${S.calOpen ? calendarCard(day) : ''}
+  ${isToday ? '' : `<div class="pastday"><span class="small">You're looking at <b>${esc(fmtDayLong(day))}</b>. Meals and exercise you add here are saved to this day.</span><button class="btn ghost sm" data-act="pickday" data-d="${iso(new Date())}">Back to today</button></div>`}
   <div class="card stack">
     <div class="hero">
       <div class="ring" role="img" aria-label="${r0(t.kcal)} of ${target} kcal">
@@ -1437,17 +1471,59 @@ function renderToday() {
     const h = Math.max(0, (H - bot) - y(x.t.kcal)), bx = left0 + i * bw + bw * 0.18;
     const col = x.t.kcal > target * 1.05 ? 'var(--tl-r)' : 'var(--leaf)';
     const lab = new Date(days[i] + 'T12:00:00').toLocaleDateString('en-GB', { weekday: 'narrow' });
-    return `<rect x="${bx}" y="${y(x.t.kcal)}" width="${bw * 0.64}" height="${h}" rx="4" fill="${col}" opacity="${days[i] === day ? 1 : 0.6}"/>
-      <text x="${bx + bw * 0.32}" y="${H - 6}" text-anchor="middle" font-size="11" fill="var(--muted)" font-family="var(--f-body)">${lab}</text>`;
+    return `<rect x="${left0 + i * bw}" y="0" width="${bw}" height="${H}" fill="transparent" data-act="pickday" data-d="${days[i]}" style="cursor:pointer"><title>${esc(dayLabel(days[i]))}: ${r0(x.t.kcal)} kcal</title></rect>
+      <rect x="${bx}" y="${y(x.t.kcal)}" width="${bw * 0.64}" height="${h}" rx="4" fill="${col}" opacity="${days[i] === day ? 1 : 0.6}" pointer-events="none"/>
+      <text x="${bx + bw * 0.32}" y="${H - 6}" text-anchor="middle" font-size="11" fill="var(--muted)" font-family="var(--f-body)" pointer-events="none">${lab}</text>`;
   }).join('');
   html += `<div class="card stack chartbox">
-    <div class="row" style="justify-content:space-between"><h3>Last 7 days</h3><span class="small muted mono">avg ${r0(avg)} kcal · ${gbp(weekCost)} spent</span></div>
+    <div class="row" style="justify-content:space-between"><h3>${isToday ? 'Last 7 days' : '7 days to ' + esc(dayLabel(day))}</h3><span class="small muted mono">avg ${r0(avg)} kcal · ${gbp(weekCost)} spent</span></div>
     <svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Calories per day for the last seven days">
       <line x1="0" x2="${W}" y1="${y(target)}" y2="${y(target)}" stroke="var(--muted)" stroke-dasharray="4 4" stroke-width="1"/>
       <text x="${W - 2}" y="${y(target) - 4}" text-anchor="end" font-size="10" fill="var(--muted)" font-family="var(--f-mono)">target ${target}</text>
       ${bars}
     </svg></div>`;
   v.innerHTML = html;
+}
+
+/* ---------- calendar: open any past day ---------- */
+function fmtDayLong(d) { return new Date(d + 'T12:00:00').toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }); }
+function calendarCard(sel) {
+  const today = iso(new Date());
+  const ym = S.calMonth || sel.slice(0, 7);
+  const [Y, M] = ym.split('-').map(Number);
+  const first = new Date(Y, M - 1, 1, 12), nDays = new Date(Y, M, 0, 12).getDate();
+  const lead = (first.getDay() + 6) % 7; // weeks start on Monday
+  const kcalBy = {}, exBy = {}, wBy = {};
+  for (const m of Object.values(S.meals)) if (m.date && m.date.startsWith(ym)) kcalBy[m.date] = (kcalBy[m.date] || 0) + num(m.nut && m.nut.kcal);
+  for (const x of Object.values(S.exercise)) if (x.date && x.date.startsWith(ym)) exBy[x.date] = 1;
+  for (const w of Object.values(S.weights)) if (w.date && w.date.startsWith(ym)) wBy[w.date] = 1;
+  const pad = n => String(n).padStart(2, '0');
+  const prevYm = M === 1 ? `${Y - 1}-12` : `${Y}-${pad(M - 1)}`, nextYm = M === 12 ? `${Y + 1}-01` : `${Y}-${pad(M + 1)}`;
+  const canNext = nextYm <= today.slice(0, 7);
+  let cells = ['M', 'T', 'W', 'T', 'F', 'S', 'S'].map((w, i) => `<span class="wd" aria-hidden="true">${w}</span>`).join('');
+  for (let i = 0; i < lead; i++) cells += '<span class="cal-day empty" aria-hidden="true"></span>';
+  let logged = 0, sum = 0;
+  for (let n = 1; n <= nDays; n++) {
+    const d = `${ym}-${pad(n)}`, k = kcalBy[d] || 0, fut = d > today;
+    const over = k > dayTarget(d) * 1.05;
+    if (k > 0) { logged++; sum += k; }
+    const cls = ['cal-day', fut && 'future', d === today && 'today', d === sel && 'sel'].filter(Boolean).join(' ');
+    const lab = `${fmtDayLong(d)}${k ? `, ${r0(k)} kcal${over ? ', over target' : ''}` : ', nothing logged'}${exBy[d] ? ', exercise' : ''}${wBy[d] ? ', weigh-in' : ''}`;
+    cells += `<button class="${cls}" ${fut ? 'disabled' : `data-act="pickday" data-d="${d}"`} aria-label="${esc(lab)}"${d === sel ? ' aria-current="date"' : ''}>
+      <span class="n">${n}</span><span class="k">${k ? r0(k) : ''}</span>
+      <span class="mk">${k ? `<i class="f${over ? ' over' : ''}"></i>` : ''}${exBy[d] ? '<i class="x"></i>' : ''}${wBy[d] ? '<i class="w"></i>' : ''}</span></button>`;
+  }
+  const monthName = first.toLocaleDateString('en-GB', { month: 'long', year: 'numeric' });
+  return `<div class="card stack" id="cal-card">
+    <div class="cal-head">
+      <button class="iconbtn" data-act="calmonth" data-ym="${prevYm}" aria-label="Previous month"><svg viewBox="0 0 24 24"><path d="M15 6l-6 6 6 6"/></svg></button>
+      <h3>${esc(monthName)}</h3>
+      <button class="iconbtn" ${canNext ? `data-act="calmonth" data-ym="${nextYm}"` : 'disabled style="opacity:.35"'} aria-label="Next month"><svg viewBox="0 0 24 24"><path d="M9 6l6 6-6 6"/></svg></button>
+    </div>
+    <div class="cal-grid">${cells}</div>
+    <div class="cal-leg"><span><i style="background:var(--leaf)"></i>Food on target</span><span><i style="background:var(--tl-r)"></i>Over target</span><span><i style="background:var(--olive)"></i>Exercise</span><span><i style="background:var(--muted)"></i>Weigh-in</span></div>
+    <p class="small muted" style="margin:0">${logged ? `Food logged on ${logged} day${logged === 1 ? '' : 's'} this month, averaging <b class="mono">${r0(sum / logged).toLocaleString('en-GB')} kcal</b>.` : 'Nothing logged this month yet.'} Tap a day to see it and add or change meals and exercise.</p>
+  </div>`;
 }
 
 function mixPct(mix) {
@@ -1468,9 +1544,9 @@ function mixDots(mix) {
   return `<span><span class="dot ${top}"></span>${nm}${ed != null ? ` · <span class="mono">${r1(ed)} kcal/g</span>` : ''}</span>`;
 }
 function balanceCard(mix, kcal) {
-  const p = mixPct(mix);
+  const p = mixPct(mix), isT = S.day === iso(new Date());
   const how = `<details class="plain"><summary class="small">How is this worked out?</summary><div class="stack small" style="margin-top:8px">${densityHelpHTML()}</div></details>`;
-  if (!p) return `<div class="card stack"><h3>Food balance</h3><p class="small muted">Log a meal to see how filling today's food is for its calories. Light foods fill you up for the fewest calories.</p>${how}</div>`;
+  if (!p) return `<div class="card stack"><h3>Food balance</h3><p class="small muted">Log a meal to see how filling ${isT ? "today's" : "this day's"} food is for its calories. Light foods fill you up for the fewest calories.</p>${how}</div>`;
   const ed = mixED(mix);
   const good = ed != null && ed <= ED_GOAL;
   const chip = ed == null ? '' : `<span class="chip ${good ? 'g' : 'a'}">${good ? 'Meets the goal' : 'Above the goal'}</span>`;
@@ -1481,14 +1557,14 @@ function balanceCard(mix, kcal) {
   const part = mix.nw && mix.nw < mix.n ? ` (from ${mix.nw} of ${mix.n} meals)` : '';
   return `<div class="card stack">
     <div class="row" style="justify-content:space-between"><h3>Food balance</h3>${chip}</div>
-    ${ed != null ? `<p style="margin:0"><b class="mono" style="font-size:1.3em">${r1(ed)}</b> kcal per gram of food today${part}. <span class="muted">Goal: ${ED_GOAL} or less.</span></p>` : ''}
+    ${ed != null ? `<p style="margin:0"><b class="mono" style="font-size:1.3em">${r1(ed)}</b> kcal per gram of food ${isT ? 'today' : 'this day'}${part}. <span class="muted">Goal: ${ED_GOAL} or less.</span></p>` : ''}
     <div class="mixbar" role="img" aria-label="Light ${r0(p.g)}%, medium ${r0(p.y)}%, dense ${r0(p.o)}% of calories"><span class="g" style="width:${p.g}%"></span><span class="y" style="width:${p.y}%"></span><span class="o" style="width:${p.o}%"></span></div>
     <div class="mixleg">
       <div><span><span class="dot g"></span>Light</span><b>${r0(p.g)}%</b><span class="muted">under 1.5 kcal/g</span></div>
       <div><span><span class="dot y"></span>Medium</span><b>${r0(p.y)}%</b><span class="muted">1.5 to 4</span></div>
       <div><span><span class="dot o"></span>Dense</span><b>${r0(p.o)}%</b><span class="muted">over 4</span></div>
     </div>
-    <p class="small muted">Share of today's calories. ${msg}</p>
+    <p class="small muted">Share of ${isT ? "today's" : "this day's"} calories. ${msg}</p>
     ${how}</div>`;
 }
 
@@ -3187,7 +3263,15 @@ document.addEventListener('click', async e => {
     return go(to);
   }
   if (a === 'go') { go(t.dataset.tab); if (t.dataset.tab === 'scan') setScan('receipt'); return; }
-  if (a === 'day') { const n = +t.dataset.n; const nd = addDays(S.day, n); if (nd <= iso(new Date())) { S.day = nd; renderToday(); } return; }
+  if (a === 'day') { const n = +t.dataset.n; const nd = addDays(S.day, n); if (nd <= iso(new Date())) { S.day = nd; S.calMonth = null; exShot.items = null; renderToday(); } return; }
+  if (a === 'cal') { S.calOpen = !S.calOpen; S.calMonth = null; renderToday(); return; }
+  if (a === 'calmonth') { S.calMonth = t.dataset.ym; renderToday(); return; }
+  if (a === 'pickday') {
+    const d = t.dataset.d; if (!d || d > iso(new Date())) return;
+    S.day = d; S.calOpen = false; S.calMonth = null; exShot.items = null;
+    renderToday(); if (S.tab !== 'today') go('today'); else window.scrollTo({ top: 0, behavior: 'smooth' });
+    return;
+  }
   if (a === 'logmeal') { go('scan'); setScan('meal'); return; }
   if (a === 'addmeal') return addMealFrom(t.dataset.m);
   if (a === 'editmeal') return editMeal(t.dataset.id);
