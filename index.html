@@ -433,7 +433,7 @@ a.btn{text-decoration:none}
         <button class="pcard noph" data-act="menu" data-to="pantry"><span class="pico"><svg viewBox="0 0 24 24"><path d="M5 8h14l-1.3 11a1.5 1.5 0 0 1-1.5 1.3H7.8a1.5 1.5 0 0 1-1.5-1.3z"/><path d="M9 8V6a3 3 0 0 1 6 0v2"/></svg></span><span class="t"><b>Pantry</b><span>What you've bought</span></span></button>
         <button class="pcard noph" data-act="menu" data-to="settings"><span class="pico"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="4"/><circle cx="12" cy="12" r=".8" fill="currentColor"/></svg></span><span class="t"><b>My goals</b><span>Weight, calorie target, units</span></span></button>
       </div>
-      <div class="card tip"><span class="ic"><svg viewBox="0 0 24 24"><path d="M9 18h6M10 21h4"/><path d="M12 3a6 6 0 0 0-3.5 10.9c.6.5 1 1.2 1 2V16h5v-.1c0-.8.4-1.5 1-2A6 6 0 0 0 12 3z"/></svg></span><div class="stack" style="gap:3px"><p class="eyebrow">Today's tip</p><p id="h-tip"></p></div></div>
+      <div class="card tip"><span class="ic"><svg viewBox="0 0 24 24"><path d="M9 18h6M10 21h4"/><path d="M12 3a6 6 0 0 0-3.5 10.9c.6.5 1 1.2 1 2V16h5v-.1c0-.8.4-1.5 1-2A6 6 0 0 0 12 3z"/></svg></span><div class="stack" style="gap:3px"><p class="eyebrow">Today's tip</p><div id="h-tip" class="stack" style="gap:8px"></div></div></div>
     </section>
 
     <!-- TODAY -->
@@ -656,7 +656,7 @@ a.btn{text-decoration:none}
     <!-- PROGRESS -->
     <section id="v-progress" class="stack" hidden></section>
   </main>
-  <p class="disclaim">Estimates only. Not medical or dietetic advice. <span class="mono">Version 18</span></p>
+  <p class="disclaim">Estimates only. Not medical or dietetic advice. <span class="mono">Version 19</span></p>
 </div>
 
 <nav class="tabs" aria-label="Sections">
@@ -1371,6 +1371,69 @@ const TIPS = [
   'Porridge oats and beans contain soluble fibre, which helps keep cholesterol down.',
   'Bulk out pasta, curry and chilli with extra veg. Same-size plate, fewer calories.'
 ];
+
+/* ---------- today's tip, built from the day's log ---------- */
+// Vegetarian sources, since that's how Glen eats.
+const TIP_FOODS = {
+  protein: 'Greek yoghurt or skyr, eggs, tofu, Quorn, cottage cheese, edamame, lentils or beans',
+  fibre: 'beans, lentils, chickpeas, porridge oats, wholegrain bread, berries, or an extra portion of veg',
+  both: 'beans, lentils, chickpeas or edamame, which are high in both'
+};
+function daysSince(d) { return d ? Math.round((new Date(iso(new Date()) + 'T12:00:00') - new Date(d + 'T12:00:00')) / 864e5) : null; }
+function lastExerciseDate() { const l = Object.values(S.exercise).map(x => x.date).filter(Boolean).sort(); return l.length ? l[l.length - 1] : null; }
+function reminderURL() {
+  // Google Calendar "add event" link: a repeating daily event whose alert does the reminding (no server needed)
+  const d = new Date(); if (d.getHours() * 60 + d.getMinutes() >= 9 * 60 + 30) d.setDate(d.getDate() + 1);
+  const ymd = iso(d).replace(/-/g, '');
+  const q = new URLSearchParams({
+    action: 'TEMPLATE', text: 'Log your first meal on Nourished',
+    details: 'Open Nourished and log your first meal of the day: ' + location.href.split('#')[0].split('?')[0],
+    dates: `${ymd}T093000/${ymd}T094000`, recur: 'RRULE:FREQ=DAILY',
+    ctz: Intl.DateTimeFormat().resolvedOptions().timeZone || 'Europe/London'
+  });
+  return 'https://calendar.google.com/calendar/render?' + q.toString();
+}
+function dayTip() {
+  const today = iso(new Date()), h = new Date().getHours();
+  const meals = mealsOn(today), { t } = dayTotals(today), target = dayTarget(today);
+  const out = { main: '', act: null, extra: [] };
+  if (!meals.length) {
+    out.main = h < 11 ? "Nothing logged yet today. Start with breakfast: logging your first meal early makes the rest of the day easier to plan."
+      : h < 17 ? "Nothing logged yet today. Log what you've eaten so far, even a rough guess, and the app can steer the rest of your day."
+      : "Nothing logged today yet. It's not too late: add what you've eaten, a rough guess is far better than a blank day.";
+    out.act = ['meal', 'Log a meal'];
+    if (!S.settings.reminderSet) out.reminder = true;
+  } else if (t.kcal > target) {
+    out.main = `You're ${r0(t.kcal - target).toLocaleString('en-GB')} kcal over today's budget. That's OK: a blow-out now and then doesn't undo a good week. Log it honestly and get back on track with ${h < 17 ? 'your next meal' : 'tomorrow’s breakfast'}.`;
+  } else {
+    // how far through the day's calories you are sets how much protein and fibre you'd expect by now
+    const share = Math.min(1, t.kcal / target), pT = proteinTarget(), fT = 30;
+    const lowP = share >= 0.2 && t.protein < pT * share * 0.8, lowF = share >= 0.2 && t.fibre < fT * share * 0.8;
+    const pace = `with ${r0(share * 100)}% of today's calories eaten`;
+    if (lowP && lowF) out.main = `You're behind on protein (${r0(t.protein)}g of ${pT}g) and fibre (${r0(t.fibre)}g of ${fT}g) ${pace}. Bulk up your next meal with ${TIP_FOODS.both}.`;
+    else if (lowP) out.main = `You're behind on protein: ${r0(t.protein)}g of your ${pT}g ${pace}. Add ${TIP_FOODS.protein} to your next meal. Protein keeps you fuller for longer.`;
+    else if (lowF) out.main = `You're behind on fibre: ${r0(t.fibre)}g of 30g ${pace}. Add ${TIP_FOODS.fibre}. Fibre fills you up and helps keep cholesterol down.`;
+    else if (t.sat > RI.sat) out.main = `Saturated fat is at ${r0(t.sat)}g, over the 20g daily reference. For the rest of today, go for beans, veg, oats and lower-fat dairy over cheese, butter and pastry.`;
+    else {
+      const doy = Math.floor((Date.now() - new Date(new Date().getFullYear(), 0, 0)) / 864e5);
+      out.main = (share >= 0.2 ? `On track: ${r0(target - t.kcal).toLocaleString('en-GB')} kcal left, with protein and fibre keeping pace. ` : '') + TIPS[doy % TIPS.length];
+    }
+  }
+  const wd = daysSince((weightList().slice(-1)[0] || {}).date);
+  if (wd == null) out.extra.push(["You haven't logged a weigh-in yet. One every week or two shows how your plan is working.", 'weigh', 'Weigh in']);
+  else if (wd >= 28) out.extra.push([`It's been ${Math.floor(wd / 7)} weeks since your last weigh-in. Step on the scales so your progress and calorie target stay up to date.`, 'weigh', 'Weigh in']);
+  const ed = daysSince(lastExerciseDate());
+  if (ed == null || ed > 7) out.extra.push([`${ed == null ? 'No exercise logged yet.' : `No exercise logged for ${ed} days.`} Being active is a great way to reach your goals, and a brisk walk counts.`, 'exercise', 'Log exercise']);
+  return out;
+}
+function dayTipHTML() {
+  const d = dayTip();
+  const btn = (to, label) => `<button class="btn ghost sm" data-act="menu" data-to="${to}">${label}</button>`;
+  let html = `<p>${esc(d.main)}</p>`;
+  if (d.act || d.reminder) html += `<div class="row" style="gap:8px;flex-wrap:wrap">${d.act ? btn(...d.act) : ''}${d.reminder ? `<a class="btn ghost sm" href="${esc(reminderURL())}" target="_blank" rel="noopener" data-act="reminder">Remind me daily</a>` : ''}</div>`;
+  for (const [text, to, label] of d.extra) html += `<div class="row" style="gap:10px;justify-content:space-between;align-items:center;border-top:1px solid var(--line);padding-top:8px"><span class="small">${esc(text)}</span>${btn(to, label)}</div>`;
+  return html;
+}
 
 /* ---------- toast ---------- */
 let toastT;
@@ -3234,8 +3297,7 @@ function renderHome() {
   const left = dayTarget(today) - t.kcal;
   const cur = latestWeight(), goal = num(S.settings.goalWeight);
   $('#h-stats').innerHTML = `<span class="mono">${r0(Math.abs(left))} kcal ${left >= 0 ? 'left' : 'over'}</span><span>${n} meal${n === 1 ? '' : 's'} today</span>${cur && goal ? `<span class="mono">${fmtWd(Math.max(0, cur - goal))} to go</span>` : ''}`;
-  const doy = Math.floor((Date.now() - new Date(new Date().getFullYear(), 0, 0)) / 864e5);
-  $('#h-tip').textContent = TIPS[doy % TIPS.length];
+  $('#h-tip').innerHTML = dayTipHTML();
   $('#h-setup').innerHTML = (!apiKey() ? `<div class="card stack"><h3>Connect Claude</h3><p class="small muted">Add your Anthropic API key to read receipts, labels and meal photos, make meal plans and search for recipes. Barcodes, weigh-ins and exercise work without it.</p><button class="btn ghost" data-act="menu" data-to="settings">Add my key</button></div>` : '') + (goal && cur ? '' : `<div class="card stack" style="border-color:var(--leaf)"><h3>Set your weight goal</h3><p class="small muted">Enter your height, weight and goal and the app will work out a daily calorie target that loses weight steadily.</p><button class="btn" data-act="menu" data-to="settings">Set my goals</button></div>`);
 }
 
@@ -3250,6 +3312,7 @@ document.addEventListener('click', async e => {
   if (t.dataset.pf) { S.pantryFilter = t.dataset.pf; return renderPantry(); }
   const a = t.dataset.act;
   if (!a && t.dataset.tab) return go(t.dataset.tab);
+  if (a === 'reminder') { S.settings.reminderSet = true; saveSettings(); setTimeout(renderHome, 800); return; }
   if (a === 'menu') {
     const to = t.dataset.to;
     if (to === 'settings') return openSettings();
@@ -3531,7 +3594,7 @@ $('#bc-start').onclick = startBarcode;
 $('#bc-stop').onclick = () => { stopBarcode(); bcSay(''); };
 $('#bc-look').onclick = () => lookupBarcode($('#bc-code').value);
 $('#bc-code').addEventListener('keydown', e => { if (e.key === 'Enter') lookupBarcode($('#bc-code').value); });
-document.addEventListener('visibilitychange', () => { if (document.hidden) stopBarcode(); });
+document.addEventListener('visibilitychange', () => { if (document.hidden) stopBarcode(); else if (S.mode !== 'loading') renderHome(); });
 
 /* ---------- install as an app ---------- */
 let installEvt = null;
