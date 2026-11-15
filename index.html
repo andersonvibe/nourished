@@ -233,9 +233,13 @@ textarea{min-height:84px;resize:vertical}
 .steps li::before{counter-increment:s;content:counter(s);font-family:var(--f-display);font-weight:800;width:30px;height:30px;border-radius:50%;display:grid;place-items:center;background:var(--leaf-soft);color:var(--leaf)}
 
 /* scan */
-.drop{border:2px dashed var(--line);border-radius:var(--r);padding:18px;text-align:center;display:flex;flex-direction:column;gap:10px;align-items:center;cursor:pointer;background:var(--surface)}
+.drop{border:2px dashed var(--line);border-radius:var(--r);padding:18px;text-align:center;display:flex;flex-direction:column;gap:10px;align-items:center;background:var(--surface)}
+label.drop{cursor:pointer}
 .drop.has{border-style:solid}
 .drop img{max-height:220px;border-radius:10px;object-fit:contain}
+.drop .picks{justify-content:center}
+.drop .picks .btn{cursor:pointer}
+.drop .drop-msg{display:flex;flex-direction:column;gap:10px;align-items:center}
 .mthumbs{display:grid;grid-template-columns:repeat(auto-fill,minmax(96px,1fr));gap:8px}
 .mthumbs:empty{display:none}
 .mthumb{position:relative;aspect-ratio:1;border-radius:10px;overflow:hidden;background:var(--surface);border:1px solid var(--line)}
@@ -507,7 +511,8 @@ a.btn{text-decoration:none}
         </div>
         <div id="r-photo-wrap">
           <input type="file" accept="image/*" id="r-file" class="filehide">
-          <label class="drop" for="r-file" id="r-drop"><span><b>Tap to take or choose a photo</b><br><span class="muted small">Flatten the receipt and fit the whole thing in shot</span></span></label>
+          <input type="file" accept="image/*" capture="environment" id="r-cam" class="filehide">
+          <div class="drop" id="r-drop"><div class="drop-msg"><span><b>Add a photo of the receipt</b><br><span class="muted small">Flatten the receipt and fit the whole thing in shot</span></span></div><div class="row picks"><label class="btn sm" for="r-cam">Take photo</label><label class="btn ghost sm" for="r-file">Choose from gallery</label></div></div>
         </div>
         <textarea id="r-text" placeholder="Paste your online order here — item names, quantities and prices" hidden></textarea>
         <button class="btn block" id="r-go">Read receipt</button>
@@ -525,7 +530,8 @@ a.btn{text-decoration:none}
           <select id="l-prod"></select>
         </label>
         <input type="file" accept="image/*" id="l-file" class="filehide">
-        <label class="drop" for="l-file" id="l-drop"><span><b>Tap to take or choose a photo</b><br><span class="muted small">Get the "per 100g" column sharp and readable</span></span></label>
+        <input type="file" accept="image/*" capture="environment" id="l-cam" class="filehide">
+        <div class="drop" id="l-drop"><div class="drop-msg"><span><b>Add a photo of the label</b><br><span class="muted small">Get the "per 100g" column sharp and readable</span></span></div><div class="row picks"><label class="btn sm" for="l-cam">Take photo</label><label class="btn ghost sm" for="l-file">Choose from gallery</label></div></div>
         <button class="btn block" id="l-go">Read label</button>
         <p class="status" id="l-status" hidden></p>
         <div id="l-review" hidden></div>
@@ -547,12 +553,14 @@ a.btn{text-decoration:none}
         </div>
         <div id="m-photo-wrap" class="stack" style="gap:8px">
           <input type="file" accept="image/*" multiple id="m-file" class="filehide">
+          <input type="file" accept="image/*" capture="environment" id="m-cam" class="filehide">
           <div class="mthumbs" id="m-thumbs" aria-label="Meal photos"></div>
-          <label class="drop" for="m-file" id="m-drop"><span><b id="m-drop-title">Tap to take or choose photos</b><br><span class="muted small" id="m-drop-hint">Shoot from above so portions are clear</span></span></label>
+          <div class="drop" id="m-drop"><span><b id="m-drop-title">Add photos of your meal</b><br><span class="muted small" id="m-drop-hint">Shoot from above so portions are clear</span></span><div class="row picks"><label class="btn sm" for="m-cam">Take photo</label><label class="btn ghost sm" for="m-file">Choose from gallery</label></div></div>
         </div>
         <div id="m-rcpt-wrap" hidden>
           <input type="file" accept="image/*" id="m2-file" class="filehide">
-          <label class="drop" for="m2-file" id="m2-drop"><span><b>Add the bill (optional)</b><br><span class="muted small">Used to name the dish and record what you paid</span></span></label>
+          <input type="file" accept="image/*" capture="environment" id="m2-cam" class="filehide">
+          <div class="drop" id="m2-drop"><div class="drop-msg"><span><b>Add the bill (optional)</b><br><span class="muted small">Used to name the dish and record what you paid</span></span></div><div class="row picks"><label class="btn sm" for="m2-cam">Take photo</label><label class="btn ghost sm" for="m2-file">Choose from gallery</label></div></div>
         </div>
         <label class="f" id="m-text-label">Anything to add?
           <textarea id="m-text" placeholder="e.g. lentil dhal with brown rice, used 1 tbsp olive oil"></textarea>
@@ -690,7 +698,7 @@ a.btn{text-decoration:none}
     <!-- PROGRESS -->
     <section id="v-progress" class="stack" hidden></section>
   </main>
-  <p class="disclaim">Estimates only. Not medical or dietetic advice. <span class="mono">Version 23</span></p>
+  <p class="disclaim">Estimates only. Not medical or dietetic advice. <span class="mono">Version 24</span></p>
 </div>
 
 <nav class="tabs" aria-label="Sections">
@@ -2146,11 +2154,11 @@ function renderMealPhotos() {
   const n = files.m.length, full = n >= MAX_MEAL_PHOTOS;
   $('#m-drop').hidden = full;
   $('#m-drop').classList.toggle('has', n > 0);
-  $('#m-drop-title').textContent = n ? 'Add another photo' : 'Tap to take or choose photos';
+  $('#m-drop-title').textContent = n ? 'Add another photo' : 'Add photos of your meal';
   const hint = $('#m-drop-hint'); if (hint) hint.textContent = n ? `Same dish from another angle, or while you made it (up to ${MAX_MEAL_PHOTOS})` : (MEAL_HINT[min] || '');
 }
 function bindMealPhotos() {
-  $('#m-file').addEventListener('change', async e => {
+  const onPick = async e => {
     const picked = Array.from(e.target.files || []).filter(f => !f.type || f.type.startsWith('image/'));
     const room = Math.max(MAX_MEAL_PHOTOS - files.m.length, 0);
     if (picked.length > room) toast(`Up to ${MAX_MEAL_PHOTOS} photos per meal. Kept the first ${room}.`);
@@ -2162,27 +2170,33 @@ function bindMealPhotos() {
     e.target.value = '';
     renderMealPhotos();
     if (bad) toast(bad === 1 ? "One photo couldn't be opened. Try taking it again or choosing another." : `${bad} photos couldn't be opened. Try taking them again or choosing others.`);
-  });
+  };
+  $('#m-file').addEventListener('change', onPick);
+  $('#m-cam').addEventListener('change', onPick);
   $('#m-thumbs').addEventListener('click', e => {
     const b = e.target.closest('[data-mrm]'); if (!b) return;
     files.m.splice(+b.dataset.mrm, 1); renderMealPhotos();
   });
 }
 function resetMealPhotos() { files.m = []; renderMealPhotos(); }
-function bindDrop(key, inputSel, dropSel, hint) {
-  $(inputSel).addEventListener('change', e => {
+// each photo box has two inputs: the camera one (capture="environment", so Android opens the camera) and the gallery one
+function bindDrop(key, inputSel, dropSel, camSel) {
+  const onPick = e => {
     const f = e.target.files && e.target.files[0];
     if (!f) return;
     files[key] = f;
     const url = URL.createObjectURL(f);
     const d = $(dropSel); d.classList.add('has');
-    d.innerHTML = `<img src="${url}" alt="Selected photo"><span class="small muted">Tap to change photo</span>`;
-  });
+    d.querySelector('.drop-msg').innerHTML = `<img src="${url}" alt="Selected photo"><span class="small muted">Not right? Take another or choose a different one.</span>`;
+    e.target.value = '';
+  };
+  $(inputSel).addEventListener('change', onPick);
+  if (camSel) $(camSel).addEventListener('change', onPick);
 }
 function resetDrop(key, dropSel, hintHTML) {
   files[key] = null;
   const d = $(dropSel); d.classList.remove('has');
-  d.innerHTML = hintHTML;
+  d.querySelector('.drop-msg').innerHTML = hintHTML;
 }
 function applyScanAvailability() {
   const off = !apiKey();
@@ -2412,7 +2426,7 @@ async function saveReceipt() {
   }
   await put('receipts', { id: newId(), store, date, total: Math.round(lines.reduce((a, l) => a + num(l.price), 0) * 100) / 100, items: lines, createdAt: Date.now() });
   rcpt = null; $('#r-review').hidden = true; $('#r-review').innerHTML = '';
-  resetDrop('r', '#r-drop', '<span><b>Tap to take or choose a photo</b><br><span class="muted small">Flatten the receipt and fit the whole thing in shot</span></span>');
+  resetDrop('r', '#r-drop', '<span><b>Add a photo of the receipt</b><br><span class="muted small">Flatten the receipt and fit the whole thing in shot</span></span>');
   $('#r-file').value = ''; $('#r-text').value = '';
   toast(`Pantry updated: ${added} new, ${updated} updated.`);
   renderAll();
@@ -2476,7 +2490,7 @@ async function saveLabel() {
   if (pendingBarcode) { p.barcode = pendingBarcode; pendingBarcode = null; }
   await put('products', p);
   labelRes = null; $('#l-review').hidden = true; $('#l-review').innerHTML = '';
-  resetDrop('l', '#l-drop', '<span><b>Tap to take or choose a photo</b><br><span class="muted small">Get the "per 100g" column sharp and readable</span></span>');
+  resetDrop('l', '#l-drop', '<span><b>Add a photo of the label</b><br><span class="muted small">Get the "per 100g" column sharp and readable</span></span>');
   $('#l-file').value = '';
   toast(`${name} saved with nutrition.`);
   fillLabelSelect(); renderAll();
@@ -3928,10 +3942,10 @@ $('#rb-file').addEventListener('change', async e => {
   for (const f of picked) { if (/^video\//.test(f.type)) out.push(f); else { try { out.push(await shrinkPhoto(f)); } catch (er) { toast("One of those pictures couldn't be read, so it was left out."); } } }
   book.files = out; showBookFiles();
 });
-bindDrop('r', '#r-file', '#r-drop');
-bindDrop('l', '#l-file', '#l-drop');
+bindDrop('r', '#r-file', '#r-drop', '#r-cam');
+bindDrop('l', '#l-file', '#l-drop', '#l-cam');
 bindMealPhotos();
-bindDrop('m2', '#m2-file', '#m2-drop');
+bindDrop('m2', '#m2-file', '#m2-drop', '#m2-cam');
 
 // goals sheet
 let formU = { h: 'ftin', w: 'kg' };
