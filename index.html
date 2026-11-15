@@ -340,6 +340,23 @@ details[open] summary{margin-bottom:10px}
 .exrow:first-child{border-top:0}
 .exform{display:grid;grid-template-columns:1fr 90px;gap:8px}
 .exform .wide{grid-column:1/-1}
+.dseg{flex-wrap:nowrap}
+.dseg button{padding:9px 2px;font-size:.84rem;min-width:0;white-space:nowrap}
+.dtiles{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.dtile{background:var(--surface);border:1px solid var(--line);border-radius:16px;padding:12px;display:flex;flex-direction:column;gap:2px;min-width:0;box-shadow:var(--shadow)}
+.dtile b{font-family:var(--f-display);font-size:1.45rem;font-weight:800;font-variant-numeric:tabular-nums;line-height:1.15}
+.dtile b small{font-size:.8rem;font-weight:600;color:var(--muted)}
+.dtile .good,.good{color:var(--tl-g)}.dtile .warn{color:var(--tl-r)}
+.dread{min-height:1.3em;color:var(--ink)}
+.dbar{height:8px;border-radius:99px;background:var(--line);overflow:hidden}.dbar span{display:block;height:100%;background:var(--leaf);border-radius:99px}
+.dstack{display:flex;gap:2px;height:14px;border-radius:99px;overflow:hidden;background:var(--line)}
+.dtip{display:flex;flex-direction:column;gap:4px;border-left:3px solid var(--olive);padding:2px 0 2px 12px}
+.dtip a{color:inherit}
+.dswap{background:var(--sunk);border-radius:12px;padding:10px 12px;display:flex;flex-direction:column;gap:2px}
+.dleg{display:flex;flex-wrap:wrap;gap:6px 14px;font-size:.84rem;color:var(--muted)}
+.dleg i{display:inline-block;width:10px;height:10px;border-radius:3px;margin-right:6px;vertical-align:-1px}
+.dleg b{color:var(--ink);font-weight:500}
+.chartbox svg rect[data-kcpt]{cursor:pointer}
 .legend{display:flex;gap:14px;flex-wrap:wrap;font-size:.8rem;color:var(--muted)}
 .legend i{display:inline-block;width:18px;height:0;border-top:2.5px solid var(--leaf);vertical-align:middle;margin-right:6px}
 .legend i.proj{border-top-style:dashed;border-top-color:var(--c-g)}
@@ -700,7 +717,7 @@ a.btn{text-decoration:none}
     <!-- PROGRESS -->
     <section id="v-progress" class="stack" hidden></section>
   </main>
-  <p class="disclaim">Estimates only. Not medical or dietetic advice. <span class="mono">Version 25</span></p>
+  <p class="disclaim">Estimates only. Not medical or dietetic advice. <span class="mono">Version 26</span></p>
 </div>
 
 <nav class="tabs" aria-label="Sections">
@@ -1943,6 +1960,7 @@ function renderProgress() {
     ${g ? `<p class="small muted">BMI ${r1(g.bmi)} · daily target ${g.kcal.toLocaleString('en-GB')} kcal</p>` : ''}
   </div>`;
   html += weightChart(l, goal, projection);
+  html += dashHTML();
   html += `<div class="card"><h3 style="margin-bottom:4px">Weigh-ins</h3><div>${l.slice().reverse().slice(0, 30).map((w, i, arr) => {
     const prev = arr[i + 1], diff = prev ? num(w.kg) - num(prev.kg) : null;
     return `<div class="wrow"><span>${fmtDate(w.date)}</span><span class="row" style="gap:12px"><b class="mono">${fmtW(num(w.kg))}</b>${diff != null ? `<span class="small mono" style="color:${diff <= 0 ? 'var(--tl-g)' : 'var(--tl-r)'}">${diff <= 0 ? '−' : '+'}${wUnit() === 'kg' ? r1(Math.abs(diff)) : r1(Math.abs(diff) * KG_LB)}</span>` : ''}<button class="linkbtn del" data-act="delweight" data-id="${esc(w.id)}">Delete</button></span></div>`;
@@ -1996,6 +2014,291 @@ function weightChart(l, goal, proj) {
     <div class="legend"><span><i></i>Your weigh-ins</span>${projEnd ? '<span><i class="proj"></i>Forecast to goal</span>' : ''}${planPath ? '<span><i style="border-top:1.5px dotted var(--muted)"></i>Original plan</span>' : ''}</div>
   </div>`;
 }
+/* ---------- progress dashboard: eating, protein, fibre and activity over a chosen range ---------- */
+// Range and meal filter sit in one row above everything they change. Days count once they're over; today and
+// days under half the calorie target (probably not fully logged, as in loggedDays()) are left out of averages.
+const DASH_RANGES = [['week', 'Week', 7], ['month', 'Month', 30], ['quarter', 'Quarter', 91], ['year', 'Year', 365]];
+const DASH_MEALS = [['all', 'All'], ['Breakfast', 'Breakfast'], ['Lunch', 'Lunch'], ['Dinner', 'Dinner'], ['Snack', 'Snacks']];
+const FIBRE_TARGET = 30; // g a day, UK SACN 2015 (same as Today's fibre bar)
+function dashData(range, meal) {
+  const n = (DASH_RANGES.find(r => r[0] === range) || DASH_RANGES[1])[2];
+  const today = iso(new Date()), end = addDays(today, -1), start = addDays(today, -n);
+  const byDay = {};
+  for (const m of Object.values(S.meals)) if (m.date >= addDays(start, -n) && m.date <= today) (byDay[m.date] = byDay[m.date] || []).push(m);
+  const dayInfo = d => {
+    const ms = byDay[d] || [], tg = dayTarget(d), sum = (list, k) => list.reduce((a, m) => a + num(m.nut && m.nut[k]), 0);
+    const all = sum(ms, 'kcal'), pick = meal === 'all' ? ms : ms.filter(m => m.type === meal);
+    const split = {}; for (const m of ms) { const t = ['Breakfast', 'Lunch', 'Dinner'].includes(m.type) ? m.type : 'Snack'; split[t] = (split[t] || 0) + num(m.nut && m.nut.kcal); }
+    const mix = { g: 0, y: 0, o: 0 }; for (const m of ms) { const x = mealMix(m); mix.g += num(x.g); mix.y += num(x.y); mix.o += num(x.o); }
+    const pm = {}; for (const m of ms) pm[m.type] = (pm[m.type] || 0) + num(m.nut && m.nut.protein);
+    return { d, ms, logged: ms.length > 0, full: ms.length > 0 && all >= tg * 0.5, all, kcal: sum(pick, 'kcal'), tg, protein: sum(ms, 'protein'), fibre: sum(ms, 'fibre'), sat: sum(ms, 'sat'), sugars: sum(ms, 'sugars'), salt: sum(ms, 'salt'), split, mix, pm };
+  };
+  const days = []; for (let i = n; i >= 1; i--) days.push(dayInfo(addDays(today, -i)));
+  const prev = []; for (let i = 2 * n; i > n; i--) prev.push(dayInfo(addDays(today, -i)));
+  const full = days.filter(x => x.full), avg = (l, k) => l.length ? l.reduce((a, x) => a + x[k], 0) / l.length : null;
+  // chart points: each day for a week or month, weekly averages (Monday to Sunday) for a quarter or year
+  let pts;
+  if (n <= 31) pts = days.map(x => ({ label: dayLabel(x.d), t: x.d, v: x.full ? x.kcal : null, tg: x.tg, n: x.full ? 1 : 0 }));
+  else {
+    const wk = {}; for (const x of days) { const w = weekStartOf(x.d); (wk[w] = wk[w] || []).push(x); }
+    pts = Object.keys(wk).sort().map(w => { const f = wk[w].filter(x => x.full); return { label: 'Week of ' + new Date(w + 'T12:00:00').toLocaleDateString('en-GB', { day: 'numeric', month: 'short' }), t: w, v: avg(f, 'kcal'), tg: avg(wk[w], 'tg'), n: f.length }; });
+  }
+  // activity: guideline minutes per week (moderate once, vigorous double), averaged over the weeks in range
+  let mins = 0; const strength = new Set();
+  for (const x of days) for (const e of exOn(x.d)) {
+    if (e.steps) continue;
+    const ex = EXM[e.type], met = ex ? ex[2] : 0, m = num(e.mins);
+    if (STRENGTH_TYPES.includes(e.type)) strength.add(x.d);
+    if (e.type === 'other' || !ex) mins += m; else if (met >= 6) mins += m * 2; else if (met >= 3) mins += m;
+  }
+  const weeks = n / 7;
+  // weight change over the range, from the weigh-ins inside it
+  const wl = weightList().filter(w => w.date >= start && w.date <= today);
+  const wChange = wl.length >= 2 ? num(wl[wl.length - 1].kg) - num(wl[0].kg) : null;
+  // logging streak: days in a row with something logged, up to today (or yesterday, if today's still empty)
+  const logDates = new Set(Object.values(S.meals).map(m => m.date));
+  let streak = 0; for (let i = logDates.has(today) ? 0 : 1; logDates.has(addDays(today, -i)); i++) streak++;
+  const split = {}; for (const x of full) for (const k in x.split) split[k] = (split[k] || 0) + x.split[k];
+  const mix = full.reduce((a, x) => ({ g: a.g + x.mix.g, y: a.y + x.mix.y, o: a.o + x.mix.o }), { g: 0, y: 0, o: 0 });
+  const pTg = proteinTarget(), pf = prev.filter(x => x.full);
+  // the foods logged on fully logged days, grouped by name (per portion), for suggestions and Claude's swaps
+  const foods = {};
+  for (const x of full) for (const m of x.ms) {
+    const key = String(m.name || '').trim().toLowerCase(); if (!key) continue;
+    const f = foods[key] = foods[key] || { name: String(m.name).trim().slice(0, 80), type: m.type || 'Meal', n: 0, kcal: 0, protein: 0, fibre: 0, sat: 0, sugars: 0, salt: 0, o: 0 };
+    f.n++; ['kcal', 'protein', 'fibre', 'sat', 'sugars', 'salt'].forEach(k => f[k] += num(m.nut && m.nut[k])); const mx = mealMix(m); f.o += num(mx.o);
+  }
+  for (const f of Object.values(foods)) { f.dense = f.kcal ? f.o / f.kcal : 0; ['kcal', 'protein', 'fibre', 'sat', 'sugars', 'salt'].forEach(k => f[k] /= f.n); }
+  const denseMeals = Object.values(foods).filter(f => f.dense > 0.5 && f.kcal >= 150).sort((a, b) => b.n * b.kcal * b.dense - a.n * a.kcal * a.dense).map(f => f.name);
+  return {
+    n, range, meal, days, full, pts, start, end,
+    avgKcal: avg(full, 'kcal'), prevKcal: avg(pf, 'kcal'), avgTg: avg(full, 'tg'),
+    onTarget: full.filter(x => x.all <= x.tg).length, partly: days.filter(x => x.logged && !x.full).length,
+    protein: avg(full, 'protein'), pTg, pDays: full.filter(x => x.protein >= pTg).length,
+    fibre: avg(full, 'fibre'), fDays: full.filter(x => x.fibre >= FIBRE_TARGET).length,
+    sat: avg(full, 'sat'), sugars: avg(full, 'sugars'), salt: avg(full, 'salt'), foods, denseMeals,
+    minsWk: mins / weeks, strengthWk: strength.size / weeks, wChange, wCount: wl.length, streak,
+    split: Object.fromEntries(Object.entries(split).map(([k, v]) => [k, v / full.length])), mix
+  };
+}
+function dashHTML() {
+  const range = S.dashRange || 'month', meal = S.dashMeal || 'all', D = dashData(range, meal);
+  const rName = { week: 'week', month: 'month', quarter: 'quarter', year: 'year' }[range];
+  const mName = meal === 'all' ? 'all meals' : meal === 'Snack' ? 'snacks' : meal.toLowerCase();
+  const fmtK = v => v == null ? '–' : r0(v).toLocaleString('en-GB');
+  const controls = `<div class="stack" style="gap:8px">
+    <div class="seg dseg" role="group" aria-label="Time range">${DASH_RANGES.map(([k, l]) => `<button data-act="drange" data-v="${k}" aria-pressed="${k === range}">${l}</button>`).join('')}</div>
+    <div class="seg dseg" role="group" aria-label="Which meals">${DASH_MEALS.map(([k, l]) => `<button data-act="dmeal" data-v="${k}" aria-pressed="${k === meal}">${l}</button>`).join('')}</div>
+  </div>`;
+  let html = `<div class="stack" id="dash" style="gap:14px"><div><h2 style="margin-top:6px">Your eating</h2><p class="muted small">Averages over the last ${D.n} days, not counting today.</p></div>${controls}`;
+  if (!D.full.length) {
+    return html + `<div class="card"><p>Nothing fully logged in the last ${rName} yet. Log your meals on Today and your averages build up here.</p></div></div>`;
+  }
+  // headline tiles
+  const diff = D.avgKcal != null && D.prevKcal != null ? D.avgKcal - D.prevKcal : null;
+  const vsTg = meal === 'all' && D.avgTg ? D.avgKcal - D.avgTg : null;
+  const share = meal !== 'all' && D.full.length ? D.avgKcal / (D.full.reduce((a, x) => a + x.all, 0) / D.full.length) : null;
+  const tile = (lab, val, sub, tone) => `<div class="dtile"><span class="small muted">${lab}</span><b class="mono">${val}</b><span class="small ${tone || 'muted'}">${sub}</span></div>`;
+  html += `<div class="dtiles">
+    ${tile(`Average a day${meal === 'all' ? '' : ' · ' + esc(mName)}`, fmtK(D.avgKcal) + '<small> kcal</small>',
+      vsTg != null ? (vsTg <= 0 ? `${fmtK(-vsTg)} under target` : `${fmtK(vsTg)} over target`) : share != null ? `${r0(share * 100)}% of your day` : '',
+      vsTg != null ? (vsTg <= 0 ? 'good' : 'warn') : '')}
+    ${tile('Days on target', `${D.onTarget}<small> of ${D.full.length}</small>`, `${D.full.length} of ${D.n} days fully logged`)}
+    ${tile(`Vs previous ${rName}`, diff == null ? '–' : (diff <= 0 ? '−' : '+') + fmtK(Math.abs(diff)) + '<small> kcal</small>', diff == null ? 'not enough logged before' : `a day, ${esc(mName)}`)}
+    ${tile('Logging streak', `${D.streak}<small> day${D.streak === 1 ? '' : 's'}</small>`, D.streak >= 7 ? 'keep it going' : 'days in a row with a meal')}
+  </div>`;
+  html += kcalChart(D);
+  html += dashTipsHTML(meal === 'all' ? D : dashData(range, 'all'));
+  // protein, fibre, activity, weight
+  const meter = (lab, val, tg, unit, days, src) => {
+    const pct = Math.min(100, val / tg * 100), ok = val >= tg;
+    return `<div class="stack" style="gap:5px"><div class="row small" style="justify-content:space-between"><b>${lab}</b><span class="mono">${r0(val)} of ${r0(tg)} ${unit} a day</span></div>
+      <div class="dbar"><span style="width:${pct}%"></span></div>
+      <span class="small muted">${ok ? '<b class="good">On target</b> on average' : `${r0(tg - val)} ${unit} short on average`} · hit on ${days} of ${D.full.length} days${src ? ' · ' + src : ''}</span></div>`;
+  };
+  html += `<div class="card stack"><h3>Protein, fibre and activity</h3>
+    ${meter('Protein', D.protein, D.pTg, 'g', D.pDays, '1.2 g per kg of goal weight')}
+    ${meter('Fibre', D.fibre, FIBRE_TARGET, 'g', D.fDays, 'UK guideline 30 g')}
+    <div class="stack" style="gap:5px"><div class="row small" style="justify-content:space-between"><b>Active minutes</b><span class="mono">${r0(D.minsWk)} of 150 a week</span></div>
+      <div class="dbar"><span style="width:${Math.min(100, D.minsWk / 150 * 100)}%"></span></div>
+      <span class="small muted">${r1(D.strengthWk)} strength day${r1(D.strengthWk) === 1 ? '' : 's'} a week on average (aim for 2) · vigorous minutes count double</span></div>
+    ${D.wChange != null ? `<p class="small" style="border-top:1px solid var(--line);padding-top:10px"><b>Weight this ${rName}:</b> <span class="mono">${D.wChange <= 0 ? '−' : '+'}${fmtWd(Math.abs(D.wChange))}</span> <span class="muted">across ${D.wCount} weigh-ins</span></p>` : ''}
+  </div>`;
+  // where the calories come from: meals and food balance
+  const sp = D.split, tot = ['Breakfast', 'Lunch', 'Dinner', 'Snack'].reduce((a, k) => a + (sp[k] || 0), 0);
+  const mixTot = D.mix.g + D.mix.y + D.mix.o;
+  const stack = (parts, label) => `<div class="dstack" role="img" aria-label="${esc(label)}">${parts.filter(p => p[1] > 0).map(p => `<span style="flex:${p[1]};background:${p[2]}"></span>`).join('')}</div>
+    <div class="dleg">${parts.map(p => `<span><i style="background:${p[2]}"></i>${p[0]} <b class="mono">${p[3]}</b></span>`).join('')}</div>`;
+  if (tot > 0) {
+    const mp = [['Breakfast', sp.Breakfast || 0, 'var(--olive)'], ['Lunch', sp.Lunch || 0, 'var(--c-g)'], ['Dinner', sp.Dinner || 0, 'var(--leaf)'], ['Snacks', sp.Snack || 0, 'var(--beet)']].map(p => [...p, fmtK(p[1])]);
+    html += `<div class="card stack"><h3>Where your calories come from</h3>
+      <p class="small muted" style="margin-top:-8px">Average kcal a day by meal</p>
+      ${stack(mp, mp.map(p => `${p[0]} ${p[3]} kcal`).join(', '))}
+      ${mixTot > 0 ? `<p class="small muted" style="margin-top:4px">Food balance: share of calories from light, medium and dense foods</p>
+      ${stack([['Light', D.mix.g, 'var(--c-g)'], ['Medium', D.mix.y, 'var(--c-y)'], ['Dense', D.mix.o, 'var(--c-o)']].map(p => [...p, r0(p[1] / mixTot * 100) + '%']), 'Food balance')}` : ''}
+    </div>`;
+  }
+  return html + '</div>';
+}
+/* ---------- suggestions: what the dashboard's numbers say to work on ---------- */
+// Each suggestion is worked out from the range's fully logged days, says why (your numbers), what to try, and
+// names its source. Only advice backed by NHS/UK guidance or peer-reviewed reviews (see GUIDE_SRC) goes here.
+const SUGGEST_SRC = {
+  leidy: ['Leidy HJ et al. The role of protein in weight loss and maintenance. Am J Clin Nutr 2015;101:1320S-1329S.', PM('Leidy role of protein in weight loss and maintenance 2015')],
+  nhsFat: ['NHS. Fat: the facts (reviewed 2023).', 'https://www.nhs.uk/live-well/eat-well/food-types/different-fats-nutrition/'],
+  nhsSugar: ['NHS. Sugar: the facts (reviewed 2023).', 'https://www.nhs.uk/live-well/eat-well/food-types/how-does-sugar-in-our-diet-affect-our-health/'],
+  nhsSalt: ['NHS. Salt: the facts (reviewed 2024).', 'https://www.nhs.uk/live-well/eat-well/food-types/salt-nutrition/']
+};
+const suggestSrc = k => SUGGEST_SRC[k] || GUIDE_SRC[k];
+function dashTips(D) {
+  const out = [], F = D.full, n = F.length, k = v => r0(v).toLocaleString('en-GB');
+  if (n < 3) return out;
+  const avgOf = (list, f) => list.length ? list.reduce((a, x) => a + f(x), 0) / list.length : 0;
+  const MEALS = ['Breakfast', 'Lunch', 'Dinner', 'Snack'], mName = m => m === 'Snack' ? 'snacks' : m.toLowerCase();
+  // 1. going over: which meal grows on the over days?
+  const over = F.filter(x => x.all > x.tg), ok = F.filter(x => x.all <= x.tg);
+  if (over.length / n > 0.3) {
+    let worst = null, wd = 0;
+    for (const m of MEALS) { const d = avgOf(over, x => x.split[m] || 0) - avgOf(ok.length ? ok : F, x => x.split[m] || 0); if (d > wd) { wd = d; worst = m; } }
+    out.push({ pri: 90, title: `You went over on ${over.length} of ${n} days`,
+      why: `On those days you ate ${k(avgOf(over, x => x.all - x.tg))} kcal over on average${worst && wd > 80 ? `, and most of the extra came at ${mName(worst)} (${k(wd)} kcal more than on your on-target days)` : ''}.`,
+      fix: worst === 'Snack' ? 'Plan your snacks: keep a filling one ready (fruit, skyr, a small handful of nuts) so you\'re not reaching for whatever is nearby.'
+        : `Plan ${worst ? mName(worst) : 'your biggest meal'} ahead, fill half the plate with veg or salad, and serve the dense parts (pasta, rice, cheese, sauces) in a measured portion.`,
+      src: ['nhsTips', 'rolls'] });
+  }
+  // 2. protein: which main meal is lightest on it?
+  if (D.protein < D.pTg * 0.9) {
+    const per = ['Breakfast', 'Lunch', 'Dinner'].map(m => [m, avgOf(F, x => x.pm[m] || 0)]).sort((a, b) => a[1] - b[1]);
+    out.push({ pri: 80, title: `Protein is ${k(D.pTg - D.protein)} g a day short`,
+      why: `You average ${k(D.protein)} g of your ${D.pTg} g. ${per[0][0]} is your lowest main meal at ${k(per[0][1])} g; about ${r0(D.pTg * 0.28)} g at each main meal gets you there.`,
+      fix: `Add protein to ${mName(per[0][0])}: ${TIP_FOODS.protein}. Protein keeps you fuller for longer and helps keep muscle while you lose fat.`,
+      src: ['leidy'] });
+  }
+  // 3. fibre
+  if (D.fibre < 27) out.push({ pri: 70, title: `Fibre is ${k(30 - D.fibre)} g a day short`,
+    why: `You average ${k(D.fibre)} g against the UK's 30 g.`,
+    fix: `Swap white bread, pasta and rice for wholegrain, and add beans, lentils, chickpeas, porridge oats, berries or an extra portion of veg. Fibre fills you up and helps keep cholesterol down.`, src: ['sacn'] });
+  // 4. calorie-dense food
+  const mixT = D.mix.g + D.mix.y + D.mix.o, dense = mixT ? D.mix.o / mixT : 0;
+  if (dense > 0.3) out.push({ pri: 65, title: `${r0(dense * 100)}% of your calories come from dense foods`,
+    why: D.denseMeals.length ? `The most calorie-dense things you log often: ${D.denseMeals.slice(0, 3).map(esc).join(', ')}.` : 'Dense foods (over 4 kcal a gram) pack a lot of calories into a small amount.',
+    fix: 'Keep the meals you like but change the balance: more veg, beans and salad, less cheese, crisps, pastry and creamy sauce. Swap crisps for popcorn or fruit, cream for yoghurt, and pastry tops for mash or filo.',
+    src: ['rolls'] });
+  // 5. saturated fat, sugars, salt against the UK reference intakes
+  if (D.sat > RI.sat) out.push({ pri: 60, title: `Saturated fat averages ${k(D.sat)} g a day`,
+    why: `That's over the 20 g daily reference. It's linked with higher cholesterol.`,
+    fix: 'Use a strong cheese so you need less, swap butter for an olive or rapeseed spread, cream for yoghurt or crème fraîche, and pastries and biscuits for fruit or oatcakes.', src: ['nhsFat'] });
+  if (D.sugars > RI.sugars) out.push({ pri: 50, title: `Sugars average ${k(D.sugars)} g a day`,
+    why: 'That\'s over the 90 g daily reference for total sugars.',
+    fix: 'Swap sugary drinks and juice for water or sugar-free versions, sweetened cereal for porridge or plain wholegrain, and flavoured yoghurt for plain with fruit.', src: ['nhsSugar'] });
+  if (D.salt > RI.salt) out.push({ pri: 45, title: `Salt averages ${r1(D.salt)} g a day`,
+    why: 'That\'s over the 6 g a day limit for adults.',
+    fix: 'Ready meals, sauces, stock, cheese and bread add up. Choose reduced-salt stock and sauces, and season with herbs, spices, lemon or vinegar.', src: ['nhsSalt'] });
+  // 6. snacks
+  const snack = avgOf(F, x => x.split.Snack || 0), avgAll = avgOf(F, x => x.all);
+  if (avgAll && snack / avgAll > 0.2) out.push({ pri: 55, title: `Snacks are ${r0(snack / avgAll * 100)}% of your calories`,
+    why: `About ${k(snack)} kcal a day comes from snacks.`,
+    fix: 'Switch to snacks that fill you up for fewer calories: fruit, skyr or Greek yoghurt, edamame, veg sticks with hummus, or plain popcorn.', src: ['rolls', 'nhsTips'] });
+  // 7. weekends
+  const we = F.filter(x => [0, 6].includes(new Date(x.d + 'T12:00:00').getDay())), wk = F.filter(x => ![0, 6].includes(new Date(x.d + 'T12:00:00').getDay()));
+  if (we.length >= 2 && wk.length >= 3) { const d = avgOf(we, x => x.all) - avgOf(wk, x => x.all); if (d > 250) out.push({ pri: 58, title: `Weekends run ${k(d)} kcal a day higher`,
+    why: `You average ${k(avgOf(wk, x => x.all))} kcal on weekdays and ${k(avgOf(we, x => x.all))} at weekends.`,
+    fix: 'Plan one weekend treat meal and enjoy it, and keep the rest of the weekend like a weekday. Log as you go so it doesn\'t creep up.', src: ['nhsTips'] }); }
+  // 8. activity
+  if (D.minsWk < 150) out.push({ pri: 40, title: `${r0(D.minsWk)} active minutes a week`,
+    why: 'The UK guideline is 150 minutes of moderate activity a week, plus strength work on 2 days.',
+    fix: 'Add a brisk 10 to 15 minute walk after a meal on most days. Short bouts all count.', src: ['cmo', 'nhsAct'] });
+  return out.sort((a, b) => b.pri - a.pri);
+}
+function dashTipsHTML(D) {
+  const tips = dashTips(D), sw = S.settings.dashSwaps;
+  const refs = keys => keys.map(k => suggestSrc(k)).filter(Boolean).map(([t, u]) => `<a href="${u}" target="_blank" rel="noopener">${esc(t.split(/[.:(]/)[0])}</a>`).join(', ');
+  let html = `<div class="card stack" id="dash-tips"><div><h3>What to work on</h3><p class="small muted">From your last ${D.n} days of logging, biggest wins first.</p></div>`;
+  if (D.full.length < 3) html += `<p class="small">Log a few more full days and suggestions will show here.</p>`;
+  else if (!tips.length) html += `<p><b class="good">You're on track.</b> Calories, protein, fibre, saturated fat, sugar and salt all look good over this ${D.range}. Keep doing what you're doing.</p>`;
+  else html += tips.slice(0, S.tipsAll ? 9 : 3).map(t => `<div class="dtip"><b>${esc(t.title)}</b><p class="small">${t.why}</p><p class="small"><span class="eyebrow" style="color:var(--leaf)">Try</span> ${esc(t.fix)}</p><p class="small muted">Source: ${refs(t.src)}</p></div>`).join('')
+    + (tips.length > 3 ? `<button class="linkbtn" data-act="tipsall">${S.tipsAll ? 'Show fewer' : `Show ${tips.length - 3} more`}</button>` : '');
+  // personal swaps from Claude, based on the foods actually logged
+  html += `<div class="stack" style="gap:8px;border-top:1px solid var(--line);padding-top:12px"><b>Swaps for the foods you eat</b>`;
+  if (sw && sw.items && sw.items.length) {
+    html += sw.items.map(s => `<div class="dswap"><p><span class="muted">Instead of</span> <b>${esc(s.from)}</b></p><p><span class="muted">try</span> <b>${esc(s.to)}</b></p>
+      <p class="small mono">${[s.kcal ? `${s.kcal > 0 ? '−' : '+'}${Math.abs(r0(s.kcal))} kcal` : '', s.protein ? `${s.protein > 0 ? '+' : '−'}${Math.abs(r0(s.protein))} g protein` : '', s.fibre ? `${s.fibre > 0 ? '+' : '−'}${Math.abs(r0(s.fibre))} g fibre` : ''].filter(Boolean).join(' · ')}</p>
+      ${s.why ? `<p class="small muted">${esc(s.why)}</p>` : ''}</div>`).join('')
+      + `<p class="small muted">Suggested ${fmtDate(sw.day)} from your last ${esc(sw.label)}. Claude's estimates, so treat numbers as a guide.</p>`;
+  } else html += `<p class="small muted">Claude can look at the meals you've logged and suggest better swaps for them. It uses your API key and costs about a penny or two.</p>`;
+  html += `<button class="btn ${sw ? 'ghost ' : ''}sm" data-act="dswaps" ${D.full.length < 3 ? 'disabled' : ''}>${sw ? 'Suggest new swaps' : 'Suggest swaps from my meals'}</button><p class="small" id="dswap-st" aria-live="polite"></p></div>`;
+  return html + '</div>';
+}
+let swapBusy = false;
+async function dashSwaps(btn) {
+  if (swapBusy) return;
+  const D = dashData(S.dashRange || 'month', 'all');
+  const foods = Object.values(D.foods).sort((a, b) => b.kcal * b.n - a.kcal * a.n).slice(0, 40)
+    .map(f => `${f.name} (${f.type}, logged ${f.n}x): ${r0(f.kcal)} kcal, ${r0(f.protein)} g protein, ${r0(f.fibre)} g fibre, ${r1(f.sat)} g sat fat, ${r0(f.sugars)} g sugars, ${r1(f.salt)} g salt, ${r0(f.dense * 100)}% of kcal from dense foods`).join('\n');
+  const issues = dashTips(D).map(t => t.title).join('; ') || 'none';
+  const prompt = `You are helping a UK adult lose weight steadily and eat better quality food. Diet: ${dietText()}.
+Targets: ${baseTarget()} kcal, ${D.pTg} g protein and 30 g fibre a day. Over the last ${D.n} days they averaged ${r0(D.avgKcal)} kcal, ${r0(D.protein)} g protein, ${r0(D.fibre)} g fibre, ${r1(D.sat)} g saturated fat, ${r0(D.sugars)} g sugars, ${r1(D.salt)} g salt; ${r0(D.mix.o / Math.max(1, D.mix.g + D.mix.y + D.mix.o) * 100)}% of calories from energy-dense foods (over 4 kcal/g).
+What to work on: ${issues}.
+Foods and meals they logged (per portion as eaten):
+${foods}
+
+Suggest up to 6 swaps for foods ON THIS LIST, biggest wins first, aimed at what to work on. Each swap replaces one logged food or ingredient with a realistic UK supermarket alternative that fits their diet and keeps the meal enjoyable (same kind of meal, similar effort). Base the reasons only on established guidance: NHS Eatwell, SACN 30 g fibre, UK reference intakes (sat fat 20 g, sugars 90 g, salt 6 g), energy density (lighter foods fill you up for fewer calories), protein for fullness and keeping muscle. No supplements, no medical claims, no cutting out whole food groups, never suggest eating less than a normal meal.
+Reply with ONLY a JSON array: [{"from": the logged food, "to": the swap, "why": one short plain sentence, "kcal": kcal saved per portion (negative if it adds), "protein": g protein gained (negative if lost), "fibre": g fibre gained}]`;
+  const st = $('#dswap-st'); swapBusy = true; btn.disabled = true; btn.textContent = 'Looking at your meals…';
+  try {
+    const res = await ask(prompt, null, { maxTokens: 4000 });
+    const items = (Array.isArray(res) ? res : []).filter(s => s && s.from && s.to).slice(0, 6).map(s => ({ from: String(s.from).slice(0, 120), to: String(s.to).slice(0, 160), why: String(s.why || '').slice(0, 240), kcal: num(s.kcal), protein: num(s.protein), fibre: num(s.fibre) }));
+    if (!items.length) throw { code: 'empty_completion' };
+    S.settings.dashSwaps = { day: iso(new Date()), label: (DASH_RANGES.find(r => r[0] === D.range) || [, 'month'])[1].toLowerCase(), items };
+    await saveSettings();
+  } catch (e) { swapBusy = false; btn.disabled = false; btn.textContent = 'Try again'; if (st) st.textContent = errMsg(e); return; }
+  swapBusy = false; const y = window.scrollY; renderProgress(); window.scrollTo(0, y);
+}
+function kcalChart(D) {
+  const pts = D.pts, showTg = D.meal === 'all';
+  const W = 320, H = 190, L = 40, R = 12, T = 14, B = 24;
+  const vals = pts.filter(p => p.v != null).map(p => p.v).concat(showTg ? [baseTarget()] : []);
+  let lo = Math.min(...vals), hi = Math.max(...vals);
+  const span = Math.max(200, hi - lo);
+  const step = [50, 100, 200, 250, 500, 1000].find(s => (span * 1.2) / s <= 5) || 1000;
+  lo = Math.max(0, Math.floor((lo - span * 0.1) / step) * step); hi = Math.ceil((hi + span * 0.1) / step) * step;
+  const nx = pts.length, x = i => L + (W - L - R) * (nx === 1 ? 0.5 : i / (nx - 1)), y = v => T + (H - T - B) * (1 - (v - lo) / (hi - lo));
+  const ticks = []; for (let k = lo; k <= hi + 1e-9; k += step) ticks.push(k);
+  // actual line, broken across days that weren't fully logged
+  let line = '', pen = false;
+  pts.forEach((p, i) => { if (p.v == null) { pen = false; return; } line += `${pen ? 'L' : 'M'}${x(i).toFixed(1)} ${y(p.v).toFixed(1)}`; pen = true; });
+  // goal line: your everyday target. Exercise you eat back raises a day's target; tapping a day shows that one.
+  const base = baseTarget(), tgLine = showTg ? `M${L} ${y(base).toFixed(1)}L${W - R} ${y(base).toFixed(1)}` : '';
+  const every = Math.max(1, Math.ceil(nx / 5));
+  const xl = pts.map((p, i) => [p, i]).filter(([, i]) => (nx - 1 - i) % every === 0);
+  const short = p => new Date(p.t + 'T12:00:00').toLocaleDateString('en-GB', D.n <= 7 ? { weekday: 'short' } : { day: 'numeric', month: 'short' });
+  const lastI = pts.map(p => p.v != null).lastIndexOf(true);
+  const tipOf = p => p.v == null ? `${p.label}: not fully logged` : `${p.label}: ${r0(p.v).toLocaleString('en-GB')} kcal${D.n > 31 ? ' a day' : ''}${showTg && p.tg ? ` · target ${r0(p.tg).toLocaleString('en-GB')}` : ''}`;
+  const hitW = (W - L - R) / Math.max(1, nx - 1);
+  const title = D.meal === 'all' ? 'Calories a day' : `Calories a day · ${D.meal === 'Snack' ? 'snacks' : D.meal.toLowerCase()}`;
+  return `<div class="card stack chartbox"><div class="row" style="justify-content:space-between"><h3>${title}</h3><span class="small muted">${D.n > 31 ? 'weekly averages' : 'each day'}</span></div>
+    <p class="small mono dread" id="kc-read" aria-live="polite">${esc(lastI >= 0 ? tipOf(pts[lastI]) : 'Tap the chart to see a day')}</p>
+    <svg viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(title)} over the last ${D.n} days${showTg ? ', with your calorie target as a red line' : ''}">
+      ${ticks.map(k => `<line x1="${L}" x2="${W - R}" y1="${y(k)}" y2="${y(k)}" stroke="var(--line)" stroke-width="1"/><text x="${L - 6}" y="${y(k) + 3.5}" text-anchor="end" font-size="10" fill="var(--muted)" font-family="var(--f-mono)">${k.toLocaleString('en-GB')}</text>`).join('')}
+      ${xl.map(([p, i]) => `<text x="${x(i)}" y="${H - 6}" text-anchor="${i === 0 ? 'start' : i === nx - 1 ? 'end' : 'middle'}" font-size="10" fill="var(--muted)" font-family="var(--f-body)">${short(p)}</text>`).join('')}
+      ${tgLine ? `<path d="${tgLine}" fill="none" stroke="var(--tl-r)" stroke-width="2" stroke-linejoin="round"/>` : ''}
+      <line id="kc-x" x1="0" x2="0" y1="${T}" y2="${H - B}" stroke="var(--muted)" stroke-width="1" stroke-dasharray="2 3" opacity="0"/>
+      <path d="${line}" fill="none" stroke="var(--leaf)" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round"/>
+      ${pts.map((p, i) => p.v == null ? '' : `<circle cx="${x(i)}" cy="${y(p.v)}" r="${nx > 40 ? 2.5 : 3.5}" fill="var(--leaf)" stroke="var(--surface)" stroke-width="1.5"/>`).join('')}
+      ${pts.map((p, i) => `<rect data-kcpt="${esc(tipOf(p))}" data-x="${x(i).toFixed(1)}" x="${(x(i) - hitW / 2).toFixed(1)}" y="${T}" width="${Math.max(hitW, 8).toFixed(1)}" height="${H - T - B}" fill="transparent"/>`).join('')}
+    </svg>
+    <div class="legend"><span><i></i>What you ate</span>${showTg ? `<span><i style="border-top-color:var(--tl-r);border-top-width:2px"></i>Your target, ${baseTarget().toLocaleString('en-GB')} kcal (more on exercise days)</span>` : ''}</div>
+    ${showTg ? '' : `<p class="small muted">The target line shows for all meals only, since your target is for the whole day.</p>`}
+    ${D.partly ? `<p class="small muted">${D.partly} day${D.partly === 1 ? '' : 's'} under half your target ${D.partly === 1 ? 'is' : 'are'} left out, as ${D.partly === 1 ? 'it was' : 'they were'} probably not fully logged.</p>` : ''}
+  </div>`;
+}
+function kcalPoint(el) {
+  const r = $('#kc-read'), xl = $('#kc-x'); if (!r || !el) return;
+  r.textContent = el.dataset.kcpt;
+  if (xl) { xl.setAttribute('x1', el.dataset.x); xl.setAttribute('x2', el.dataset.x); xl.setAttribute('opacity', '1'); }
+}
+document.addEventListener('pointerover', e => { const el = e.target.closest && e.target.closest('[data-kcpt]'); if (el) kcalPoint(el); });
+document.addEventListener('pointerdown', e => { const el = e.target.closest && e.target.closest('[data-kcpt]'); if (el) kcalPoint(el); });
 async function saveWeigh() {
   const kg = readW('w-kg'), date = $('#w-date').value || iso(new Date());
   if (!kg || kg < 30 || kg > 300) return toast(wUnit() === 'st' ? 'Enter your weight in stones and pounds, e.g. 14 st 7 lb.' : wUnit() === 'lb' ? 'Enter your weight in pounds, e.g. 203.5.' : 'Enter your weight in kg, e.g. 92.4.');
@@ -3820,6 +4123,9 @@ document.addEventListener('click', async e => {
   if (t.dataset.pf) { S.pantryFilter = t.dataset.pf; return renderPantry(); }
   const a = t.dataset.act;
   if (!a && t.dataset.tab) return go(t.dataset.tab);
+  if (a === 'dswaps') return dashSwaps(t);
+  if (a === 'tipsall') { S.tipsAll = !S.tipsAll; const y = window.scrollY; renderProgress(); window.scrollTo(0, y); return; }
+  if (a === 'drange' || a === 'dmeal') { if (a === 'drange') S.dashRange = t.dataset.v; else S.dashMeal = t.dataset.v; const y = window.scrollY; renderProgress(); window.scrollTo(0, y); return; }
   if (a === 'reminder') { S.settings.reminderSet = true; saveSettings(); setTimeout(renderHome, 800); return; }
   if (a === 'menu') {
     const to = t.dataset.to;
