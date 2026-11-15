@@ -214,6 +214,13 @@ textarea{min-height:84px;resize:vertical}
 .prod .h{display:flex;gap:8px;align-items:baseline;justify-content:space-between}
 .prod .h b{min-width:0;overflow-wrap:anywhere}
 .lights{display:flex;gap:5px;flex-wrap:wrap}
+.pfrow{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px}
+.fchips{display:flex;gap:6px;overflow-x:auto;scrollbar-width:none;margin-inline:-16px;padding-inline:16px;padding-block:2px;-webkit-overflow-scrolling:touch}
+.fchips::-webkit-scrollbar{display:none}
+.fchips button{flex:none;border:1px solid var(--line);background:var(--surface);color:var(--ink);border-radius:99px;padding:8px 13px;min-height:38px;font-weight:700;font-size:.88rem;cursor:pointer;white-space:nowrap}
+.fchips button .mono{color:var(--muted);font-weight:400;font-size:.8rem}
+.fchips button[aria-pressed="true"]{background:var(--leaf);border-color:var(--leaf);color:var(--leaf-ink)}
+.fchips button[aria-pressed="true"] .mono{color:inherit;opacity:.8}
 
 /* ideas */
 .idea h3{font-size:1.15rem}
@@ -745,7 +752,7 @@ const S = {
   mode: 'loading',
   settings: { kcal: 2000, diet: 'any', likes: '', dislikes: '', sex: 'm', age: null, heightCm: null, goalWeight: null, activity: 1.2, pace: 0.5, ownKcal: false, earnBack: 0.5, wUnit: 'kg', hUnit: 'ftin' },
   products: {}, meals: {}, receipts: {}, weights: {}, plans: {}, exercise: {}, recipes: {},
-  day: iso(new Date()), tab: 'home', pantryFilter: 'all', pantryQ: '', openProd: null, planDay: 0, planView: 'week'
+  day: iso(new Date()), tab: 'home', pantryFilter: 'all', pantryQ: '', pantryStore: '', openProd: null, planDay: 0, planView: 'week'
 };
 
 /* ---------- storage: everything lives on this phone ---------- */
@@ -1585,28 +1592,84 @@ async function saveWeigh() {
 }
 
 /* ---------- PANTRY ---------- */
+// "High protein" uses the EU/UK nutrition-claim rule: at least 20% of the energy comes from protein (Regulation (EC) No 1924/2006, Annex).
+const highProtein = p => !!(p.per100 && num(p.per100.kcal) > 0 && num(p.per100.protein) * 4 / num(p.per100.kcal) >= 0.2);
+const PANTRY_FILTERS = [
+  ['all', 'All', () => true],
+  ['needs', 'Needs label', p => !p.per100],
+  ['noprice', 'No price', p => p.price == null],
+  ['protein', 'High protein', highProtein],
+  ['lowsugar', 'Low sugar', p => !!p.per100 && lightFor('sugars', numN(p.per100.sugars)) === 'g'],
+  ['lowsat', 'Low sat fat', p => !!p.per100 && lightFor('sat', numN(p.per100.sat)) === 'g'],
+  ['lowsalt', 'Low salt', p => !!p.per100 && lightFor('salt', numN(p.per100.salt)) === 'g']
+];
+// [key, label, value(p) or null when unknown, direction]; products with no value go to the end
+const PANTRY_SORTS = [
+  ['name', 'Name A–Z', p => String(p.name || '').toLowerCase(), 1],
+  ['recent', 'Recently bought', p => p.lastBought || null, -1],
+  ['added', 'Recently added', p => p.createdAt || null, -1],
+  ['ppk', 'Price per kg, cheapest', p => unitPrice(p), 1],
+  ['price', 'Pack price, cheapest', p => p.price ?? null, 1],
+  ['kcal', 'Calories, lowest', p => p.per100 ? num(p.per100.kcal) : null, 1],
+  ['protein', 'Protein, highest', p => p.per100 ? num(p.per100.protein) : null, -1],
+  ['sugars', 'Sugar, lowest', p => p.per100 ? num(p.per100.sugars) : null, 1],
+  ['fibre', 'Fibre, highest', p => p.per100 ? num(p.per100.fibre) : null, -1]
+];
+function sortPantry(list, key) {
+  const s = PANTRY_SORTS.find(x => x[0] === key) || PANTRY_SORTS[0], get = s[2], dir = s[3];
+  return list.map(p => ({ p, v: get(p) })).sort((a, b) => {
+    const an = a.v == null, bn = b.v == null;
+    if (an || bn) return an === bn ? String(a.p.name).localeCompare(String(b.p.name)) : an ? 1 : -1;
+    const c = typeof a.v === 'string' ? a.v.localeCompare(b.v) : a.v - b.v;
+    return c ? c * dir : String(a.p.name).localeCompare(String(b.p.name));
+  }).map(x => x.p);
+}
+function pantrySortNote(p, key) {
+  const fmt = d => new Date(d).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: '2-digit' });
+  if (key === 'recent') return p.lastBought ? 'bought ' + fmt(p.lastBought) : 'never on a receipt';
+  if (key === 'added') return p.createdAt ? 'added ' + fmt(p.createdAt) : '';
+  if (key === 'protein' && p.per100) return r1(num(p.per100.protein)) + 'g protein/100g';
+  if (key === 'sugars' && p.per100) return r1(num(p.per100.sugars)) + 'g sugar/100g';
+  if (key === 'fibre' && p.per100) return r1(num(p.per100.fibre)) + 'g fibre/100g';
+  return '';
+}
 function renderPantry() {
   const v = $('#v-pantry');
   const all = productList();
   const needs = all.filter(p => !p.per100).length;
   const q = norm(S.pantryQ);
-  let list = all.filter(p => !q || norm(p.name).includes(q));
-  if (S.pantryFilter === 'needs') list = list.filter(p => !p.per100);
+  const sortKey = S.settings.pantrySort || 'name';
+  const f = PANTRY_FILTERS.find(x => x[0] === S.pantryFilter) || PANTRY_FILTERS[0];
+  const stores = [...new Set(all.map(p => (p.store || '').trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b));
+  if (S.pantryStore && !stores.includes(S.pantryStore)) S.pantryStore = '';
+  let list = all.filter(p => !q || norm(p.name).includes(q) || (p.generic && norm(p.generic).includes(q)));
+  list = list.filter(f[2]);
+  if (S.pantryStore) list = list.filter(p => (p.store || '').trim() === S.pantryStore);
+  list = sortPantry(list, sortKey);
   let html = `<div><h2>Pantry</h2><p class="muted small">${all.length} product${all.length === 1 ? '' : 's'} · ${needs} still need a label scan</p></div>`;
   if (!all.length) {
     v.innerHTML = html + `<div class="card stack"><p>Your pantry fills up when you scan a receipt. Each product keeps its price, pack size and nutrition.</p><button class="btn" data-act="go" data-tab="scan">Scan a receipt</button></div>`;
     return;
   }
-  html += `<div class="row"><input type="search" id="p-q" placeholder="Search products" value="${esc(S.pantryQ)}" style="flex:1;min-width:160px">
-    <div class="seg" style="flex:none"><button data-pf="all" aria-pressed="${S.pantryFilter === 'all'}">All</button><button data-pf="needs" aria-pressed="${S.pantryFilter === 'needs'}">Needs label</button></div></div>
-    <div class="card">${list.length ? list.map(p => prodRow(p)).join('') : '<p class="muted">No products match.</p>'}</div>`;
+  const narrowed = q || f[0] !== 'all' || S.pantryStore;
+  html += `<div class="stack" style="gap:10px">
+    <input type="search" id="p-q" placeholder="Search products" value="${esc(S.pantryQ)}" aria-label="Search products">
+    <div class="pfrow">
+      <label class="f">Sort by<select id="p-sort">${PANTRY_SORTS.map(s => `<option value="${s[0]}" ${s[0] === sortKey ? 'selected' : ''}>${s[1]}</option>`).join('')}</select></label>
+      ${stores.length ? `<label class="f">Shop<select id="p-store"><option value="">All shops</option>${stores.map(s => `<option ${s === S.pantryStore ? 'selected' : ''}>${esc(s)}</option>`).join('')}</select></label>` : ''}
+    </div>
+    <div class="fchips" role="group" aria-label="Show">${PANTRY_FILTERS.map(x => `<button type="button" data-pf="${x[0]}" aria-pressed="${x[0] === f[0]}">${x[1]}${x[0] === 'all' ? '' : ` <span class="mono">${all.filter(x[2]).length}</span>`}</button>`).join('')}</div>
+    ${narrowed ? `<div class="row small muted" style="justify-content:space-between"><span>Showing ${list.length} of ${all.length}</span><button class="linkbtn" data-act="pclear">Clear filters</button></div>` : ''}
+    ${['protein', 'lowsugar', 'lowsat', 'lowsalt'].includes(f[0]) ? `<p class="small muted">${f[0] === 'protein' ? 'At least 20% of calories from protein, the UK and EU rule for a "high protein" claim.' : 'Green on the UK front-of-pack traffic lights (per 100g).'} Products without a label scan are left out.</p>` : ''}
+  </div>
+    <div class="card">${list.length ? list.map(p => prodRow(p, pantrySortNote(p, sortKey))).join('') : '<p class="muted">No products match.</p>'}</div>`;
   const focused = document.activeElement && document.activeElement.id === 'p-q';
   v.innerHTML = html;
   if (focused) { const i = $('#p-q'); i.focus(); i.setSelectionRange(i.value.length, i.value.length); }
 }
-function prodRow(p) {
+function prodRow(p, note = '') {
   const up = unitPrice(p);
-  const meta = [p.price != null ? gbp(p.price) : null, packText(p) || null, up != null ? gbp(up * 1000) + '/kg' : null, p.store || null].filter(Boolean).join(' · ');
+  const meta = [p.price != null ? gbp(p.price) : null, packText(p) || null, up != null ? gbp(up * 1000) + '/kg' : null, p.store || null, note || null].filter(Boolean).join(' · ');
   const open = S.openProd === p.id;
   let h = `<div class="prod"><div class="h"><b>${esc(p.name)}</b><button class="linkbtn" data-act="toggleprod" data-id="${esc(p.id)}">${open ? 'Close' : 'Edit'}</button></div>
     <span class="small muted mono">${esc(meta || 'No price yet')}</span>
@@ -3122,6 +3185,7 @@ document.addEventListener('click', async e => {
     openMealSheet('Build your meal'); mealAdd = null; renderMealReview();
     return;
   }
+  if (a === 'pclear') { S.pantryQ = ''; S.pantryFilter = 'all'; S.pantryStore = ''; return renderPantry(); }
   if (a === 'toggleprod') { S.openProd = S.openProd === t.dataset.id ? null : t.dataset.id; return renderPantry(); }
   if (a === 'scanlabel') { labelPre = t.dataset.id; go('scan'); setScan('label'); return; }
   if (a === 'saveprod') {
@@ -3176,6 +3240,8 @@ document.addEventListener('click', async e => {
 document.addEventListener('input', e => {
   if (e.target.id === 'bc-g') bcSum(); if (e.target.id === 'p-q') { S.pantryQ = e.target.value; renderPantry(); } if (e.target.id === 'ex-mins' || e.target.id === 'ex-type') updateExHint(); if (e.target.id === 'rb-q') { book.q = e.target.value; renderBook(); } });
 document.addEventListener('change', async e => {
+  if (e.target.id === 'p-sort') { S.settings.pantrySort = e.target.value; renderPantry(); return saveSettings(); }
+  if (e.target.id === 'p-store') { S.pantryStore = e.target.value; return renderPantry(); }
   if (e.target.id === 'ex-file') return readExShot([...e.target.files]);
   if (e.target.dataset && e.target.dataset.exon != null) { const x = (exShot.items || [])[+e.target.dataset.exon]; if (x) x.on = e.target.checked; return; }
   if (e.target.dataset && e.target.dataset.exkcal != null) { const x = (exShot.items || [])[+e.target.dataset.exkcal]; if (x) x.kcal = Math.max(0, Math.round(num(e.target.value))); return; }
