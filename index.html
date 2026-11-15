@@ -214,6 +214,10 @@ textarea{min-height:84px;resize:vertical}
 .prod .h{display:flex;gap:8px;align-items:baseline;justify-content:space-between}
 .prod .h b{min-width:0;overflow-wrap:anywhere}
 .lights{display:flex;gap:5px;flex-wrap:wrap}
+.pcat{font-family:var(--f-display);font-size:.95rem;margin:14px 0 2px;color:var(--leaf)}
+.pcat:first-child{margin-top:0}
+.pcat+.prod{border-top:0;padding-top:4px}
+.pcl{font-weight:700;color:var(--leaf)}
 .pfrow{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px}
 .fchips{display:flex;gap:6px;overflow-x:auto;scrollbar-width:none;margin-inline:-16px;padding-inline:16px;padding-block:2px;-webkit-overflow-scrolling:touch}
 .fchips::-webkit-scrollbar{display:none}
@@ -619,7 +623,7 @@ a.btn{text-decoration:none}
     <!-- PROGRESS -->
     <section id="v-progress" class="stack" hidden></section>
   </main>
-  <p class="disclaim">Estimates only. Not medical or dietetic advice. <span class="mono">Version 14</span></p>
+  <p class="disclaim">Estimates only. Not medical or dietetic advice. <span class="mono">Version 15</span></p>
 </div>
 
 <nav class="tabs" aria-label="Sections">
@@ -752,7 +756,7 @@ const S = {
   mode: 'loading',
   settings: { kcal: 2000, diet: 'any', likes: '', dislikes: '', sex: 'm', age: null, heightCm: null, goalWeight: null, activity: 1.2, pace: 0.5, ownKcal: false, earnBack: 0.5, wUnit: 'kg', hUnit: 'ftin' },
   products: {}, meals: {}, receipts: {}, weights: {}, plans: {}, exercise: {}, recipes: {},
-  day: iso(new Date()), tab: 'home', pantryFilter: 'all', pantryQ: '', pantryStore: '', openProd: null, planDay: 0, planView: 'week'
+  day: iso(new Date()), tab: 'home', pantryFilter: 'all', pantryQ: '', pantryStore: '', pantryCat: '', openProd: null, planDay: 0, planView: 'week'
 };
 
 /* ---------- storage: everything lives on this phone ---------- */
@@ -1592,6 +1596,38 @@ async function saveWeigh() {
 }
 
 /* ---------- PANTRY ---------- */
+// Pantry categories. A product keeps p.cat once it's set (receipt scan or by hand); otherwise it's guessed from its name.
+const CATS = [
+  ['dairy', 'Dairy & eggs'], ['meat', 'Meat'], ['fish', 'Fish & seafood'], ['alt', 'Meat-free & tofu'],
+  ['fruit', 'Fruit'], ['veg', 'Veg'], ['bakery', 'Bread & bakery'], ['frozen', 'Frozen'],
+  ['tins', 'Tins'], ['jars', 'Jars, sauces & dips'], ['cupboard', 'Cupboard'], ['snacks', 'Snacks & treats'],
+  ['drinks', 'Drinks'], ['misc', 'Miscellaneous']
+];
+const CATN = Object.fromEntries(CATS);
+// first match wins, so specific rules come before general ones (tinned tomatoes are Tins, milk chocolate is a treat)
+const CAT_RULES = [
+  ['frozen', /\bfrozen\b|\bice cream|\bice lolly|\bfrozen yog/],
+  ['alt', /\bquorn\b|\btofu\b|\btempeh\b|\bseitan\b|meat[ -]?free|plant[ -]?based|\bvegan (sausage|burger|mince|nugget|bacon|chicken)|\bveggie (sausage|burger|mince)|vegetarian (sausage|burger|mince)|\bsoya mince|\bfalafel/],
+  ['tins', /\btin(s|ned)?\b|\bcans?\b|\bcanned\b|baked beans|\bchickpeas?|kidney beans|butter beans|black beans|cannellini|borlotti|haricot|coconut milk|chopped tomatoes|plum tomatoes|tomato passata|\bpassata\b/],
+  ['veg', /butternut|cherry tomato/],
+  ['snacks', /chocolate|\bcrisps?\b|biscuit|cookie|\bsweets?\b|\bcakes?\b|popcorn|cereal bar|\bflapjack|\bbrownie|doughnut|\bdonut|\bpretzel|tortilla chips|\bnachos|rice cakes?|\bcrackers?\b|oatcakes?|protein bar|\bsnack/],
+  ['jars', /\bjar\b|\bsauce|\bpesto\b|\bmayo|\bketchup|\bmustard|chutney|\bjam\b|marmalade|\bhoney\b|peanut butter|(nut|almond|cashew) butter|\bpaste\b|\bolives?\b(?! oil)|\bpickle|\bsalsa\b|hummus|houmous|\btahini|\bgherkin|\bcapers?\b|\bdressing|\bdip\b|tzatziki|guacamole|\bmiso\b|\bspread\b/],
+  ['dairy', /\b(oat|soya|soy|almond|rice|hazelnut|cashew|coconut) drink|\bmilk\b|\bmilks\b|\bcheese|\bcheddar|\bmozzarella|\bfeta\b|halloumi|\bparmesan|\bricotta|\bpaneer|\bbrie\b|\bgouda|\bstilton|yog(h)?urt|\bbutter\b|\bcream\b|creme fraiche|crème fraîche|\beggs?\b|\bkefir|\bquark\b|\bskyr\b|fromage|\bcustard|\bmargarine/],
+  ['drinks', /\bjuice|smoothie|\bwater\b|\bcola\b|\bcoke\b|lemonade|\bsquash\b|\bcordial|\btea\b|teabags?|\bcoffee|\bbeer\b|\blager|\bwine\b|\bcider\b|\bgin\b|\bvodka|\bwhisk(e)?y|kombucha|\bsoda\b|tonic|energy drink|\bdrink/],
+  ['fish', /\bsalmon|\btuna\b|\bcod\b|haddock|\bprawns?|mackerel|sardines?|\bfish|seafood|mussels?|\bcrab|scampi|\btrout|anchov|\bpollock|\bhake\b|kipper|\bsquid/],
+  ['meat', /\bchicken|\bbeef\b|\bpork\b|\blamb\b|\bham\b|\bbacon|\bsausages?|\bmince\b|\bturkey|chorizo|salami|\bsteak|\bburgers?\b|pepperoni|prosciutto|\bduck\b|\bgammon/],
+  ['bakery', /\bbread|\bloaf|\brolls?\b|\bbagels?|\bwraps?\b|\btortillas?\b|\bpittas?\b|\bpitta|\bnaan|croissant|\bmuffins?|crumpets?|baguette|sourdough|brioche|\bbaps?\b|ciabatta|focaccia|hot cross|\bscones?/],
+  ['cupboard', /black pepper|peppercorn|chilli (flakes|powder)|paprika|\bcumin|turmeric|\bcurry powder|garam masala|cinnamon|oregano|mixed herbs|\bnutmeg|\bspices?\b|\bseasoning|stock cubes?|\bstock\b|\bgravy/],
+  ['fruit', /\bapples?\b|banana|\boranges?\b|\bgrapes?\b|berr(y|ies)|\blemons?\b|\blimes?\b|\bpears?\b|\bpeach|\bplums?\b|\bmango|pineapple|\bmelon|watermelon|\bkiwi|cherr(y|ies)|avocado|satsuma|clementine|mandarin|nectarine|apricot|\braisins?|sultana|\bfigs?\b|\bdates\b|pomegranate|grapefruit|\bfruit/],
+  ['veg', /tomato|potato|\bonions?|carrot|\bpeppers?\b|broccoli|spinach|lettuce|\bsalad|cucumber|courgette|mushroom|garlic|ginger|\bkale\b|cabbage|\bleeks?\b|celery|cauliflower|aubergine|\bpeas\b|green beans|runner beans|sweetcorn|\bcorn\b|beetroot|\brocket\b|coriander|\bbasil\b|parsley|\bmint\b|spring onion|\bchill(i|ies)\b|\bsquash\b|parsnip|swede|\bturnip|asparagus|sprouts|pak choi|bok choy|edamame|\bveg/],
+  ['cupboard', /\bpasta|spaghetti|penne|fusilli|macaroni|lasagne|\brice\b|noodle|\bflour|\bsugar|\boats\b|porridge|cereal|granola|muesli|weetabix|cornflakes|\blentils?|quinoa|couscous|bulgur|\boil\b|vinegar|\bsalt\b|\bnuts?\b|almond|walnut|cashew|peanut|pistachio|hazelnut|pecan|\bseeds?\b|\bchia|\bflax|\blinseed|\bdried\b|baking|\byeast|\bcocoa|\bbeans?\b|\bpulses?/]
+];
+function guessCat(text) {
+  const t = String(text || '').toLowerCase();
+  for (const [k, re] of CAT_RULES) if (re.test(t)) return k;
+  return 'misc';
+}
+const catOf = p => (p.cat && CATN[p.cat]) ? p.cat : guessCat(`${p.generic || ''} ${p.name || ''}`);
 // "High protein" uses the EU/UK nutrition-claim rule: at least 20% of the energy comes from protein (Regulation (EC) No 1924/2006, Annex).
 const highProtein = p => !!(p.per100 && num(p.per100.kcal) > 0 && num(p.per100.protein) * 4 / num(p.per100.kcal) >= 0.2);
 const PANTRY_FILTERS = [
@@ -1606,6 +1642,7 @@ const PANTRY_FILTERS = [
 // [key, label, value(p) or null when unknown, direction]; products with no value go to the end
 const PANTRY_SORTS = [
   ['name', 'Name A–Z', p => String(p.name || '').toLowerCase(), 1],
+  ['cat', 'Category', p => CATS.findIndex(c => c[0] === catOf(p)), 1],
   ['recent', 'Recently bought', p => p.lastBought || null, -1],
   ['added', 'Recently added', p => p.createdAt || null, -1],
   ['ppk', 'Price per kg, cheapest', p => unitPrice(p), 1],
@@ -1642,19 +1679,23 @@ function renderPantry() {
   const f = PANTRY_FILTERS.find(x => x[0] === S.pantryFilter) || PANTRY_FILTERS[0];
   const stores = [...new Set(all.map(p => (p.store || '').trim()).filter(Boolean))].sort((a, b) => a.localeCompare(b));
   if (S.pantryStore && !stores.includes(S.pantryStore)) S.pantryStore = '';
+  const catCount = {}; all.forEach(p => { const c = catOf(p); catCount[c] = (catCount[c] || 0) + 1; });
+  if (S.pantryCat && !catCount[S.pantryCat]) S.pantryCat = '';
   let list = all.filter(p => !q || norm(p.name).includes(q) || (p.generic && norm(p.generic).includes(q)));
   list = list.filter(f[2]);
   if (S.pantryStore) list = list.filter(p => (p.store || '').trim() === S.pantryStore);
+  if (S.pantryCat) list = list.filter(p => catOf(p) === S.pantryCat);
   list = sortPantry(list, sortKey);
   let html = `<div><h2>Pantry</h2><p class="muted small">${all.length} product${all.length === 1 ? '' : 's'} · ${needs} still need a label scan</p></div>`;
   if (!all.length) {
     v.innerHTML = html + `<div class="card stack"><p>Your pantry fills up when you scan a receipt. Each product keeps its price, pack size and nutrition.</p><button class="btn" data-act="go" data-tab="scan">Scan a receipt</button></div>`;
     return;
   }
-  const narrowed = q || f[0] !== 'all' || S.pantryStore;
+  const narrowed = q || f[0] !== 'all' || S.pantryStore || S.pantryCat;
   html += `<div class="stack" style="gap:10px">
     <input type="search" id="p-q" placeholder="Search products" value="${esc(S.pantryQ)}" aria-label="Search products">
     <div class="pfrow">
+      <label class="f">Category<select id="p-cat"><option value="">All categories</option>${CATS.filter(c => catCount[c[0]]).map(c => `<option value="${c[0]}" ${c[0] === S.pantryCat ? 'selected' : ''}>${esc(c[1])} (${catCount[c[0]]})</option>`).join('')}</select></label>
       <label class="f">Sort by<select id="p-sort">${PANTRY_SORTS.map(s => `<option value="${s[0]}" ${s[0] === sortKey ? 'selected' : ''}>${s[1]}</option>`).join('')}</select></label>
       ${stores.length ? `<label class="f">Shop<select id="p-store"><option value="">All shops</option>${stores.map(s => `<option ${s === S.pantryStore ? 'selected' : ''}>${esc(s)}</option>`).join('')}</select></label>` : ''}
     </div>
@@ -1662,7 +1703,7 @@ function renderPantry() {
     ${narrowed ? `<div class="row small muted" style="justify-content:space-between"><span>Showing ${list.length} of ${all.length}</span><button class="linkbtn" data-act="pclear">Clear filters</button></div>` : ''}
     ${['protein', 'lowsugar', 'lowsat', 'lowsalt'].includes(f[0]) ? `<p class="small muted">${f[0] === 'protein' ? 'At least 20% of calories from protein, the UK and EU rule for a "high protein" claim.' : 'Green on the UK front-of-pack traffic lights (per 100g).'} Products without a label scan are left out.</p>` : ''}
   </div>
-    <div class="card">${list.length ? list.map(p => prodRow(p, pantrySortNote(p, sortKey))).join('') : '<p class="muted">No products match.</p>'}</div>`;
+    <div class="card">${list.length ? list.map((p, i) => (sortKey === 'cat' && (i === 0 || catOf(list[i - 1]) !== catOf(p)) ? `<h4 class="pcat">${esc(CATN[catOf(p)])}</h4>` : '') + prodRow(p, pantrySortNote(p, sortKey))).join('') : '<p class="muted">No products match.</p>'}</div>`;
   const focused = document.activeElement && document.activeElement.id === 'p-q';
   v.innerHTML = html;
   if (focused) { const i = $('#p-q'); i.focus(); i.setSelectionRange(i.value.length, i.value.length); }
@@ -1670,13 +1711,15 @@ function renderPantry() {
 function prodRow(p, note = '') {
   const up = unitPrice(p);
   const meta = [p.price != null ? gbp(p.price) : null, packText(p) || null, up != null ? gbp(up * 1000) + '/kg' : null, p.store || null, note || null].filter(Boolean).join(' · ');
+  const cat = catOf(p);
   const open = S.openProd === p.id;
   let h = `<div class="prod"><div class="h"><b>${esc(p.name)}</b><button class="linkbtn" data-act="toggleprod" data-id="${esc(p.id)}">${open ? 'Close' : 'Edit'}</button></div>
-    <span class="small muted mono">${esc(meta || 'No price yet')}</span>
+    <span class="small muted">${(S.settings.pantrySort || 'name') === 'cat' ? '' : `<span class="pcl">${esc(CATN[cat])}</span> `}<span class="mono">${esc(meta || 'No price yet')}</span></span>
     <div class="lights">${lightsHTML(p.per100)}${p.per100 ? `<span class="chip n mono">${r0(num(p.per100.kcal))} kcal/100g</span>` : `<button class="btn ghost sm" data-act="scanlabel" data-id="${esc(p.id)}">Scan label</button>`}</div>`;
   if (open) {
     h += `<div class="plain stack" style="margin-top:6px">
       <label class="f">Name<input type="text" id="pe-name" value="${esc(p.name)}"></label>
+      <label class="f">Category<select id="pe-cat">${CATS.map(c => `<option value="${c[0]}" ${c[0] === cat ? 'selected' : ''}>${esc(c[1])}</option>`).join('')}</select></label>
       <div class="grid2"><label class="f">Pack size (g or ml)<input type="number" inputmode="decimal" id="pe-grams" value="${p.grams ?? ''}"></label>
       <label class="f">Price per pack (£)<input type="number" inputmode="decimal" step="0.01" id="pe-price" value="${p.price ?? ''}"></label></div>
       ${p.per100 ? labelHTML(p.per100, 'Per 100g') : ''}
@@ -1892,7 +1935,7 @@ async function readReceipt() {
   const known = productList().slice(0, 200).map(p => `${p.id}: ${p.name}`).join('\n') || '(none yet)';
   const prompt = `You are reading a UK supermarket ${rin === 'photo' ? 'receipt photo' : 'online grocery order'} for a food tracker. Extract every purchased item.
 Reply with ONLY this JSON:
-{"store": string or null, "date": "YYYY-MM-DD" or null, "items": [{"name": "readable product name, expand receipt abbreviations, e.g. Tesco Wholewheat Fusilli", "generic": "plain ingredient name in lower case with no brand, shop or pack details, e.g. 'semi-skimmed milk', 'walnuts', 'bananas'; null if it isn't food or drink", "receiptText": "the line as printed", "qty": number, "price": number (total £ paid for this line after any discount on that item), "grams": number or null (weight of ONE pack in grams; treat ml as grams; null if unknown), "matchId": "an id from the known products list if it is clearly the same product, else null"}]}
+{"store": string or null, "date": "YYYY-MM-DD" or null, "items": [{"name": "readable product name, expand receipt abbreviations, e.g. Tesco Wholewheat Fusilli", "generic": "plain ingredient name in lower case with no brand, shop or pack details, e.g. 'semi-skimmed milk', 'walnuts', 'bananas'; null if it isn't food or drink", "category": one of "dairy" (incl. eggs and plant milks/yoghurts), "meat", "fish", "alt" (meat-free, tofu, Quorn), "fruit", "veg", "bakery", "frozen", "tins", "jars" (jars, sauces, spreads, dips), "cupboard" (dry goods, pasta, rice, oils, spices, nuts), "snacks", "drinks", "misc" (non-food or anything else), "receiptText": "the line as printed", "qty": number, "price": number (total £ paid for this line after any discount on that item), "grams": number or null (weight of ONE pack in grams; treat ml as grams; null if unknown), "matchId": "an id from the known products list if it is clearly the same product, else null"}]}
 Skip bags, totals, subtotals, payment, change, VAT, loyalty summaries and coupons for the whole shop. Apply item-level discounts or multibuy savings to the item they belong to.
 Known products (id: name):
 ${known}` + (rin === 'text' ? `\n\nOrder text:\n${text.slice(0, 20000)}` : '');
@@ -1909,7 +1952,7 @@ ${known}` + (rin === 'text' ? `\n\nOrder text:\n${text.slice(0, 20000)}` : '');
           const hit = Object.values(S.products).find(p => norm(p.name) === n2 || (p.aliases || []).some(a => norm(a) === n1));
           if (hit) match = hit.id;
         }
-        return { on: true, generic: it.generic ? String(it.generic).toLowerCase() : null, name: String(it.name || it.receiptText || 'Item'), receiptText: String(it.receiptText || ''), qty: Math.max(1, num(it.qty) || 1), price: numN(it.price), grams: numN(it.grams), matchId: match };
+        return { on: true, cat: CATN[it.category] ? it.category : null, generic: it.generic ? String(it.generic).toLowerCase() : null, name: String(it.name || it.receiptText || 'Item'), receiptText: String(it.receiptText || ''), qty: Math.max(1, num(it.qty) || 1), price: numN(it.price), grams: numN(it.grams), matchId: match };
       })
     };
     done();
@@ -1953,13 +1996,14 @@ async function saveReceipt() {
     let p = it.matchId && S.products[it.matchId] ? clone(S.products[it.matchId]) : null;
     if (p) {
       updated++;
+      if (!p.cat && it.cat) p.cat = it.cat;
       if (unit != null) p.price = Math.round(unit * 100) / 100;
       if (grams) p.grams = grams;
       if (store) p.store = store;
       if (it.receiptText && !(p.aliases || []).includes(it.receiptText)) p.aliases = [...(p.aliases || []), it.receiptText].slice(-6);
     } else {
       added++;
-      p = { id: newId(), name, generic: it.generic || null, grams, price: unit != null ? Math.round(unit * 100) / 100 : null, store, per100: null, aliases: it.receiptText ? [it.receiptText] : [], createdAt: Date.now() };
+      p = { id: newId(), name, cat: it.cat || null, generic: it.generic || null, grams, price: unit != null ? Math.round(unit * 100) / 100 : null, store, per100: null, aliases: it.receiptText ? [it.receiptText] : [], createdAt: Date.now() };
     }
     if (unit != null) p.history = [...(p.history || []), { price: Math.round(unit * 100) / 100, store, date }].slice(-12);
     p.lastBought = date;
@@ -3185,12 +3229,12 @@ document.addEventListener('click', async e => {
     openMealSheet('Build your meal'); mealAdd = null; renderMealReview();
     return;
   }
-  if (a === 'pclear') { S.pantryQ = ''; S.pantryFilter = 'all'; S.pantryStore = ''; return renderPantry(); }
+  if (a === 'pclear') { S.pantryQ = ''; S.pantryFilter = 'all'; S.pantryStore = ''; S.pantryCat = ''; return renderPantry(); }
   if (a === 'toggleprod') { S.openProd = S.openProd === t.dataset.id ? null : t.dataset.id; return renderPantry(); }
   if (a === 'scanlabel') { labelPre = t.dataset.id; go('scan'); setScan('label'); return; }
   if (a === 'saveprod') {
     const p = clone(S.products[t.dataset.id]);
-    p.name = $('#pe-name').value.trim() || p.name; p.grams = numN($('#pe-grams').value); p.price = numN($('#pe-price').value);
+    p.name = $('#pe-name').value.trim() || p.name; if ($('#pe-cat')) p.cat = $('#pe-cat').value; p.grams = numN($('#pe-grams').value); p.price = numN($('#pe-price').value);
     await put('products', p); S.openProd = null; toast('Product saved.'); return renderAll();
   }
   if (a === 'delprod1') { t.hidden = true; t.parentElement.querySelector('[data-act="delprod2"]').hidden = false; return; }
@@ -3241,6 +3285,7 @@ document.addEventListener('input', e => {
   if (e.target.id === 'bc-g') bcSum(); if (e.target.id === 'p-q') { S.pantryQ = e.target.value; renderPantry(); } if (e.target.id === 'ex-mins' || e.target.id === 'ex-type') updateExHint(); if (e.target.id === 'rb-q') { book.q = e.target.value; renderBook(); } });
 document.addEventListener('change', async e => {
   if (e.target.id === 'p-sort') { S.settings.pantrySort = e.target.value; renderPantry(); return saveSettings(); }
+  if (e.target.id === 'p-cat') { S.pantryCat = e.target.value; return renderPantry(); }
   if (e.target.id === 'p-store') { S.pantryStore = e.target.value; return renderPantry(); }
   if (e.target.id === 'ex-file') return readExShot([...e.target.files]);
   if (e.target.dataset && e.target.dataset.exon != null) { const x = (exShot.items || [])[+e.target.dataset.exon]; if (x) x.on = e.target.checked; return; }
