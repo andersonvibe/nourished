@@ -151,6 +151,8 @@ textarea{min-height:84px;resize:vertical}
 .chip{display:inline-flex;align-items:center;gap:5px;font-size:.75rem;font-weight:700;border-radius:99px;padding:3px 9px;white-space:nowrap}
 .chip.g{background:var(--tl-g-bg);color:var(--tl-g)}
 .chip.a{background:var(--tl-a-bg);color:var(--tl-a)}
+.pubcal{display:flex;flex-direction:column;gap:4px;background:var(--tl-g-bg);border-radius:12px;padding:10px 12px}
+.pubcal b{color:var(--tl-g)}
 .chip.r{background:var(--tl-r-bg);color:var(--tl-r)}
 .chip.n{background:var(--sunk);color:var(--muted)}
 .status{font-size:.9rem;color:var(--muted);display:flex;gap:8px;align-items:center}
@@ -690,7 +692,7 @@ a.btn{text-decoration:none}
     <!-- PROGRESS -->
     <section id="v-progress" class="stack" hidden></section>
   </main>
-  <p class="disclaim">Estimates only. Not medical or dietetic advice. <span class="mono">Version 23</span></p>
+  <p class="disclaim">Estimates only. Not medical or dietetic advice. <span class="mono">Version 25</span></p>
 </div>
 
 <nav class="tabs" aria-label="Sections">
@@ -1753,7 +1755,7 @@ function renderToday() {
       return `<div class="meal" data-act="editmeal" data-id="${esc(m.id)}" role="button" tabindex="0" aria-label="Edit ${esc(m.name)}">
         <span class="nm">${esc(m.name)}</span><span class="kc">${r0(num(m.nut && m.nut.kcal))} kcal</span>
         ${ings.length > 1 ? `<span class="items">${esc(ings.map(g => g.name).join(', '))}</span>` : ''}
-        <div class="sub"><span>${esc(m.type || '')}</span>${mixDots(mealMix(m))}${m.source === 'out' ? `<span class="chip a">Eaten out${m.venue ? ' · ' + esc(m.venue) : ''}</span>` : ''}
+        <div class="sub"><span>${esc(m.type || '')}</span>${mixDots(mealMix(m))}${m.source === 'out' ? `<span class="chip ${m.published ? 'g' : 'a'}">Eaten out${m.venue ? ' · ' + esc(m.venue) : ''}${m.published ? ' · menu kcal' : ''}</span>` : ''}
           <span class="mono">${m.cost ? gbp(m.cost) : 'no price'}${m.unpriced ? ' · ' + m.unpriced + ' unpriced' : ''}</span>
           <span class="mono">P ${r0(num(m.nut.protein))}g · C ${r0(num(m.nut.carbs))}g · F ${r0(num(m.nut.fat))}g</span>
           <button class="linkbtn" data-act="editmeal" data-id="${esc(m.id)}">Edit or add food</button>
@@ -2519,7 +2521,7 @@ function mealResFrom(m) {
     editId: m.id, createdAt: m.createdAt, date: m.date, type: m.type, name: m.name, servings: whole ? 1 : num(m.servings) || 1, eaten: whole ? 1 : num(m.eaten) || 1,
     confidence: m.confidence || 'medium', note: '', source: m.source || 'text', venue: m.venue || '',
     price: out && num(m.cost) ? Math.round(num(m.cost) / (num(m.eaten) || 1) * 100) / 100 : null, priceNote: '',
-    keep: { recipeId: m.recipeId, recipeSource: m.recipeSource, extras: m.extras }, ingredients: ings
+    keep: { recipeId: m.recipeId, recipeSource: m.recipeSource, extras: m.extras, published: m.published }, ingredients: ings
   };
 }
 const MEAL_HINT = { plate: 'Shoot from above so portions are clear', recipe: 'Get the ingredients list and serving count in shot', out: 'Photo of your plate before you start' };
@@ -2539,7 +2541,7 @@ function setMin(v) {
   } else if (mealRes && !mealRes.editId && !mealRes.ingredients.length) { clearMealReview(); }
   renderMealPhotos();
   $('#m-text-label').firstChild.textContent = MEAL_TEXT_LABEL[v] || 'Anything to add?';
-  $('#m-text').placeholder = v === 'out' ? 'e.g. The Red Lion, Pizza Express, shared starter, my share of the bill was £18' : 'e.g. lentil dhal with brown rice, used 1 tbsp olive oil';
+  $('#m-text').placeholder = v === 'out' ? 'e.g. Nando\'s, quarter chicken, peri chips, Coke Zero. Chains\' published calories are looked up' : 'e.g. lentil dhal with brown rice, used 1 tbsp olive oil';
 }
 async function estimateMeal() {
   const btn = $('#m-go'), st = $('#m-status');
@@ -2584,26 +2586,71 @@ async function estimateOut(note) {
   if (mealPh.length === 1) desc.push('Image 1 is a photo of the meal.');
   else if (mealPh.length > 1) desc.push(`Images 1 to ${mealPh.length} are photos of the same meal from different angles or moments; treat them as one meal and count each item once.`);
   if (files.m2) { imgs.push(files.m2); desc.push(`Image ${imgs.length} is the restaurant bill or receipt.`); }
+  const chain = chainIn(note);
   const prompt = `Estimate the nutrition of a meal eaten out in the UK (restaurant, pub, café or takeaway) for a calorie and macro tracker. It is one person's meal.
 ${desc.join(' ')}
 ${note ? 'The user adds: ' + note.slice(0, 2000) : ''}
-Restaurant portions are usually bigger and richer than home cooking: allow for cooking oil, butter, cheese, sauces, dressings and fried sides. If the venue is a UK chain whose published nutrition you know for this dish, base the estimate on it and say so in the note.
+Restaurant portions are usually bigger and richer than home cooking: allow for cooking oil, butter, cheese, sauces, dressings and fried sides.
+UK CHAINS: UK food businesses with 250+ staff must publish calories for their menus, so for a chain the real figures exist. If the venue (from the note, photo or bill) is a UK restaurant, pub, café or takeaway chain${chain ? ` (it looks like ${chain})` : ''}, use web search to find that chain's CURRENT published nutrition or calorie information for these exact dishes and drinks, preferring the chain's own website, menu or nutrition PDF (open a PDF or page with web fetch if the search snippet doesn't show the figure). Use the item and size that match what the person had. Only report a published figure you actually found in the search or fetched page, with that page's URL. Do not search for independent or one-off venues; just estimate those.
+If you found published calories, set basis to "published", list each item with its published kcal, and choose the ingredient grams so the components add up to the published total (as served, for the whole dish). Use published fat, carbs, sugars, protein and salt too where the chain gives them. If you couldn't find a figure for an item, estimate that item and leave it out of "published".
 If there is a bill, work out which dish or dishes this person had (use the photo and the user's note) and what those lines cost. If the bill covers several people and you can't tell which lines were theirs, set price to null.
 Reply with ONLY this JSON:
-{"name": "dish name", "venue": "venue name or null", "price": number or null (£ for this person's items), "priceNote": "which bill lines the price covers, or null", "confidence": "low" | "medium" | "high", "note": "one short sentence on the biggest uncertainty", "ingredients": [{"name": string, "grams": number (amount on the plate, as served), "per100": {"kcal": n, "fat": n, "sat": n, "carbs": n, "sugars": n, "fibre": n, "protein": n, "salt": n} (values for the food as served), "drink": true only for a drink, else false}]}
+{"name": "dish name", "venue": "venue name or null", "chain": "chain name if the venue is a chain, else null", "basis": "published" | "estimate", "published": [{"item": "menu item as the chain names it", "kcal": number}] (empty if none found), "sourceUrl": "URL of the page or PDF the published figures came from, or null", "price": number or null (£ for this person's items), "priceNote": "which bill lines the price covers, or null", "confidence": "low" | "medium" | "high", "note": "one short sentence on the biggest uncertainty", "ingredients": [{"name": string, "grams": number (amount on the plate, as served), "per100": {"kcal": n, "fat": n, "sat": n, "carbs": n, "sugars": n, "fibre": n, "protein": n, "salt": n} (values for the food as served), "drink": true only for a drink, else false}]}
 List the dish's main components, 3–12 of them (e.g. pizza base, mozzarella, tomato sauce, toppings; or bun, beef patty, cheese, mayo, chips).`;
-  const done = busy(btn, st, 'Estimating…', 'Working out the dish and portion. This usually takes 15–45 seconds.');
+  const done = busy(btn, st, 'Estimating…', chain ? `Looking up ${poss(chain)} published menu calories. This usually takes 20–60 seconds.` : 'Working out the dish and portion. If it\'s a chain, its published menu calories are looked up. This usually takes 15–60 seconds.');
+  const prog = m => { st.innerHTML = '<span class="spin"></span><span>' + esc({ 'Reading recipe pages…': 'Reading the menu…', 'Writing up the recipes…': 'Writing up the meal…' }[m] || m) + '</span>'; };
   try {
-    const res = await ask(prompt, imgs.length ? imgs : null);
+    let res;
+    try { res = await ask(prompt, imgs.length ? imgs : null, { maxTokens: 12000, tools: CHAIN_TOOLS(), onProgress: prog }); }
+    catch (e) { if (e && e.code === 'api') res = await ask(prompt, imgs.length ? imgs : null); else throw e; }
     if (!res || !Array.isArray(res.ingredients) || !res.ingredients.length) throw { code: 'empty_completion' };
+    const ings = res.ingredients.map(x => ingFrom(x, 'Component'));
+    const published = publishedFrom(res, ings);
     takeEstimate({
       name: String(res.name || 'Meal out'), servings: 1, eaten: 1, source: 'out', date: S.day, type: mealTypeNow(),
-      venue: res.venue ? String(res.venue) : '', price: numN(res.price), priceNote: res.priceNote || '',
+      venue: res.venue ? String(res.venue) : (res.chain ? String(res.chain) : ''), price: numN(res.price), priceNote: res.priceNote || '',
       confidence: ['low', 'medium', 'high'].includes(res.confidence) ? res.confidence : 'low', note: res.note || '',
-      ingredients: res.ingredients.map(x => ({ name: String(x.name || 'Component'), grams: Math.max(0, num(x.grams)), productId: null, per100: Object.fromEntries(NUT.map(k => [k, num(x.per100 && x.per100[k])])) }))
+      keep: { published }, ingredients: ings
     });
     done(); renderMealReview();
   } catch (e) { done(errMsg(e)); }
+}
+// UK chains (they must publish menu calories by law since April 2022). Names only, used to spot a chain in the note; the figures are looked up live each time.
+const CHAINS = ["Wetherspoon", "Spoons", "Nando's", "Pizza Express", "Greggs", "Toby Carvery", "Harvester", "Beefeater", "Brewers Fayre", "Hungry Horse", "Flaming Grill", "Sizzling Pubs", "Chef & Brewer", "Vintage Inns", "Miller & Carter", "Stonehouse", "Ember Inns", "Crown Carveries", "Farmhouse Inns", "Table Table", "Wagamama", "Zizzi", "Ask Italian", "Bella Italia", "Prezzo", "Côte", "Franco Manca", "Pizza Hut", "Domino's", "Papa John's", "Frankie & Benny's", "Chiquito", "TGI Fridays", "Five Guys", "Byron", "GBK", "Gourmet Burger Kitchen", "Honest Burgers", "McDonald's", "Burger King", "KFC", "Subway", "Taco Bell", "Wimpy", "Pret", "Leon", "Itsu", "Wasabi", "Tortilla", "Wingstop", "Popeyes", "Costa", "Starbucks", "Caffè Nero", "Caffe Nero", "Gail's", "Paul", "Patisserie Valerie", "Turtle Bay", "Las Iguanas", "Dishoom", "Giraffe", "Bill's", "Cosy Club", "Loungers", "Brewdog", "Yo! Sushi", "Wahaca", "Tank & Paddle", "Marston's", "Greene King", "Hungry Horse", "Slug and Lettuce", "All Bar One", "Browns", "Pizza Pilgrims", "Gusto", "Carluccio's", "Wildwood", "Fuller's", "Sam's Chop House", "Morrisons Café", "Ikea", "Wetherspoons"];
+function chainIn(t) {
+  const n = String(t || '').toLowerCase().replace(/[’`]/g, "'");
+  if (!n) return '';
+  const hit = CHAINS.find(c => { const k = c.toLowerCase().replace(/[’`]/g, "'"); return new RegExp('(^|[^a-z])' + k.replace(/[.*+?^${}()|[\]\\]/g, '\\$&').replace(/'/g, "'?") + '($|[^a-z])').test(n); });
+  return hit ? ({ Spoons: 'Wetherspoon', Wetherspoons: 'Wetherspoon', 'Caffe Nero': 'Caffè Nero', GBK: 'Gourmet Burger Kitchen' }[hit] || hit) : '';
+}
+function CHAIN_TOOLS() {
+  return [
+    { type: 'web_search_20250305', name: 'web_search', max_uses: 3, user_location: { type: 'approximate', country: 'GB', timezone: 'Europe/London' } },
+    { type: 'web_fetch_20250910', name: 'web_fetch', max_uses: 2, max_content_tokens: 30000 }
+  ];
+}
+// Published chain figures from Claude's answer. Only kept with a link the search really returned; the components are scaled to the published total.
+function publishedFrom(res, ings) {
+  if (res.basis !== 'published' || !Array.isArray(res.published)) return null;
+  const items = res.published.map(x => ({ item: String(x.item || '').slice(0, 80), kcal: Math.round(num(x.kcal)) })).filter(x => x.item && x.kcal > 0).slice(0, 8);
+  if (!items.length) return null;
+  const url = res.sourceUrl && /^https?:\/\//i.test(res.sourceUrl) ? String(res.sourceUrl) : '';
+  const checked = !!url && lastSearchUrls.has(normUrl(url));
+  if (!checked) return null;
+  const total = items.reduce((a, x) => a + x.kcal, 0);
+  const food = ings.reduce((a, g) => a + num(g.per100.kcal) * g.grams / 100, 0);
+  // everything on the plate counted as published: make the components add up to the chain's figure
+  if (food > 0 && Math.abs(food - total) / total > 0.03 && items.length >= 1) {
+    const f = total / food; ings.forEach(g => { g.grams = Math.round(g.grams * f); });
+  }
+  return { chain: String(res.chain || res.venue || '').slice(0, 60), items, kcal: total, url, at: iso(new Date()) };
+}
+function poss(n) { return /'s$/i.test(n) ? n : /s$/i.test(n) ? n + "'" : n + "'s"; }
+function publishedHTML(p) {
+  if (!p || !p.items || !p.items.length) return '';
+  return `<div class="pubcal small"><b>From ${esc(poss(p.chain || 'the chain'))} published nutrition</b>
+    <span>${p.items.map(x => `${esc(x.item)} <b>${x.kcal} kcal</b>`).join(" · ")}</span>
+    <span class="muted">Components below are sized to match. Change "How much you ate" if you didn't finish it. ${p.url ? `<a href="${esc(p.url)}" target="_blank" rel="noopener">Source: ${esc(urlHost(p.url) || 'link')}</a>` : ''}</span></div>`;
 }
 function mealTypeNow() { const h = new Date().getHours(); return h < 11 ? 'Breakfast' : h < 15 ? 'Lunch' : h < 21 ? 'Dinner' : 'Snack'; }
 function renderMealReview() {
@@ -2629,6 +2676,7 @@ function renderMealReview() {
       <label class="f">Date<input type="date" id="mr-date" value="${esc(r.date || S.day)}"></label>
     </div>
     ${out && r.priceNote ? `<p class="small muted">Price from the bill: ${esc(r.priceNote)}</p>` : ''}
+    ${out ? publishedHTML(r.keep && r.keep.published) : ''}
     <p class="eyebrow">${out ? 'On the plate (grams as served)' : multi ? 'Ingredients (whole recipe, grams)' : 'What\'s in it (grams)'}</p>
     <div id="mr-ings">${r.ingredients.length ? r.ingredients.map((g, i) => `
       <div class="ing rm"><input type="text" id="mi-name-${i}" value="${esc(g.name)}" aria-label="Food">
@@ -2940,7 +2988,7 @@ function recalcMeal() {
     $('#mi-meta-' + i).innerHTML = g.portion
       ? `<span>Portions as logged · ${r0(num(per.kcal) * g.grams / 100)} kcal</span>`
       : r.source === 'out'
-      ? `<span>Estimated · ${r0(num(per.kcal) * g.grams / 100)} kcal</span>`
+      ? `<span>${r.keep && r.keep.published ? 'Sized to the published total' : 'Estimated'} · ${r0(num(per.kcal) * g.grams / 100)} kcal</span>`
       : `<span>${p && p.per100 ? (p.barcode ? 'From the barcode' : 'Your label') : 'Typical values'} · ${r0(num(per.kcal) * g.grams / 100)} kcal</span><span class="mono">${up != null ? gbp(up * g.grams) : 'no price'}</span>`;
   });
   const c = calcMeal(r.ingredients, r.servings, r.eaten);
