@@ -729,7 +729,7 @@ a.btn{text-decoration:none}
     <label class="f">Foods to avoid
       <input type="text" id="set-dislikes" placeholder="e.g. mushrooms, coriander">
     </label>
-    <p class="small muted">Calorie targets use the Mifflin-St Jeor formula. They're a starting point, so adjust after a few weeks of weigh-ins. Check with your GP before a big change in diet, especially if you take medication.</p>
+    <p class="small muted">Calorie targets use the Mifflin-St Jeor formula. They're a starting point, so adjust after a few weeks of weigh-ins. Your protein target is 1.2g per kg of your goal weight, the low end of the 1.2 to 1.6g/kg range that studies link with keeping muscle while losing weight (Leidy et al., <i>Am J Clin Nutr</i> 2015) and the top of the 1.0 to 1.2g/kg advised for over-65s (PROT-AGE, Bauer et al., <i>JAMDA</i> 2013). The UK minimum for adults is 0.75g/kg. Check with your GP before a big change in diet, especially if you take medication.</p>
     <button class="btn" id="save-settings">Save my goals</button>
     <hr style="border:0;border-top:1px solid var(--line);width:100%">
     <div class="stack" style="gap:8px">
@@ -3183,7 +3183,7 @@ async function makePlan() {
   const kcal = num(S.settings.kcal) || 2000, prot = proteinTarget();
   const extra = $('#pl-ask').value.trim();
   const prompt = `Create a ${n}-day meal plan for a UK adult who is losing weight steadily, and looking after their liver and cholesterol.
-Daily calorie target: ${kcal} kcal. Each day's meals must add up to within 60 kcal of it. Protein at least ${prot} g a day. Fibre at least 30 g a day.
+Daily calorie target: ${kcal} kcal. Each day's meals must add up to within 60 kcal of it. Protein at least ${prot} g a day, spread across the day: about ${Math.round(prot * 0.28)} g at each main meal and ${Math.round(prot * 0.16)} g in the snack. ${PROTEIN_SOURCES[S.settings.diet] || PROTEIN_SOURCES.any} Fibre at least 30 g a day. Add up each day's kcal, protein and fibre before you answer and fix any day that misses.
 Make it filling for the calories: each day's food (not drinks) should average about 1.25 kcal per gram as eaten or less (the World Cancer Research Fund goal), built mostly on light foods (under 1.5 kcal per gram as eaten: vegetables, salad, fruit, broth and lentil soups, cooked beans and lentils, fat-free yoghurt, skyr, cottage cheese), with dense foods (over 4 kcal per gram: oil, butter, nuts, seeds, hard cheese, granola, chocolate) in measured amounts. Favour high-protein, high-fibre, slow-release foods: oats, pulses, eggs, wholegrains, soya. Little added sugar, saturated fat and salt. No medical claims.
 ${planContext()}
 Each day has breakfast, lunch, dinner and one snack. Weekday dinners take ${mins} minutes or less; lunches 15 minutes or less or leftovers. Reuse ingredients across days to cut waste and cost, and batch-cook where it makes sense (e.g. "Leftover lentil chilli from day 2"). Plain UK supermarket ingredients with gram amounts for one person.
@@ -3195,12 +3195,54 @@ Reply with ONLY this JSON:
   try {
     const res = await ask(prompt);
     if (!res || !Array.isArray(res.days) || !res.days.length) throw { code: 'empty_completion' };
-    const plan = { id: 'current', start: iso(new Date()), kcal, created: Date.now(), tip: String(res.tip || ''),
-      days: res.days.slice(0, n).map(d => ({ meals: (d.meals || []).map(cleanPlanMeal) })),
+    const days = res.days.slice(0, n).map(d => ({ meals: (d.meals || []).map(cleanPlanMeal) }));
+    await fixPlanDays(days, kcal, prot, st);
+    const plan = { id: 'current', start: iso(new Date()), kcal, prot, created: Date.now(), tip: String(res.tip || ''),
+      days,
       shopping: (res.shopping || []).map(x => ({ item: String(x.item || x), have: !!x.have })) };
     await put('plans', plan);
     S.planDay = 0; done(); renderPlan();
   } catch (e) { done(errMsg(e)); }
+}
+const PROTEIN_SOURCES = {
+  any: 'Get protein from lean sources: eggs, Greek yoghurt or skyr, cottage cheese, fish, chicken, beans, lentils, tofu.',
+  pescatarian: 'Get protein from eggs, Greek yoghurt or skyr, cottage cheese, fish and seafood, beans, lentils, tofu, edamame.',
+  vegetarian: 'They are vegetarian and sometimes eat vegan protein. Get protein from Quorn, tofu, tempeh, lentils, beans, chickpeas, edamame, eggs, Greek yoghurt or skyr, cottage cheese, high-protein soya yoghurt; mix plant proteins (e.g. lentils with wholegrains) through the day.',
+  vegan: 'Get protein from tofu, tempeh, seitan, soya mince, edamame, lentils, beans, chickpeas, soya yoghurt and soya milk; mix plant proteins through the day.'
+};
+// how a planned day compares with the targets: null if it's fine
+function planDayMiss(day, kcal, prot) {
+  const t = { kcal: 0, protein: 0, fibre: 0 }; day.meals.forEach(m => { t.kcal += num(m.kcal); t.protein += num(m.protein); t.fibre += num(m.fibre); });
+  const miss = [];
+  if (Math.abs(t.kcal - kcal) > 100) miss.push(`${r0(t.kcal)} kcal instead of ${kcal}`);
+  if (t.protein < prot * 0.95) miss.push(`${r0(t.protein)} g protein, short of ${prot} g`);
+  if (t.fibre < 27) miss.push(`${r0(t.fibre)} g fibre, short of 30 g`);
+  return miss.length ? { t, miss } : null;
+}
+// one round of asking Claude to rework any day that misses the calorie, protein or fibre targets
+async function fixPlanDays(days, kcal, prot, st) {
+  const bad = days.map((d, i) => ({ i, m: planDayMiss(d, kcal, prot) })).filter(x => x.m);
+  if (!bad.length) return;
+  if (st) st.innerHTML = `<span class="spin"></span><span>Checking the numbers: reworking ${bad.length} day${bad.length === 1 ? '' : 's'} to hit your calorie, protein and fibre targets…</span>`;
+  const prompt = `Some days of a UK weight-loss meal plan miss their targets. Every day must be within 60 kcal of ${kcal} kcal, with at least ${prot} g protein and at least 30 g fibre.
+${PROTEIN_SOURCES[S.settings.diet] || PROTEIN_SOURCES.any}
+${planContext()}
+Keep each day's meal types (breakfast, lunch, dinner, snack) and keep the meals close to the originals where you can: adjust portions, add a protein or fibre side, or swap one meal. Keep it filling for the calories (mostly light foods under 1.5 kcal per gram as eaten). Add up the totals before you answer.
+Days to fix:
+${bad.map(b => `Day ${b.i + 1} (${b.m.miss.join('; ')}): ${days[b.i].meals.map(m => `${m.type}: ${m.name} (${r0(m.kcal)} kcal, ${r0(m.protein)} g protein, ${r0(m.fibre)} g fibre)`).join('; ')}`).join('\n')}
+Reply with ONLY this JSON, one entry per day listed above:
+{"days": [{"day": day number, "meals": [${PLAN_SHAPE}]}]}`;
+  try {
+    const res = await ask(prompt);
+    for (const d of (res && res.days) || []) {
+      const i = num(d.day) - 1;
+      if (!bad.some(b => b.i === i) || !Array.isArray(d.meals) || !d.meals.length) continue;
+      const fixed = { meals: d.meals.map(cleanPlanMeal) };
+      // only take the new day if it's closer to the targets than the old one
+      const score = x => { const m = planDayMiss(x, kcal, prot); return m ? Math.abs(m.t.kcal - kcal) / 50 + Math.max(0, prot - m.t.protein) + Math.max(0, 30 - m.t.fibre) : 0; };
+      if (score(fixed) < score(days[i])) days[i] = fixed;
+    }
+  } catch (e) { /* keep the first plan; the day view flags what's off */ }
 }
 function cleanPlanMeal(m) {
   const o = { type: String(m.type || 'Meal'), name: String(m.name || 'Meal'), mins: num(m.mins),
@@ -3226,6 +3268,7 @@ function renderPlan() {
   body.innerHTML = `<div class="daychips" role="group" aria-label="Plan day">${chips}</div>
   <div class="card stack">
     <div class="row" style="justify-content:space-between;align-items:baseline"><h3>${new Date(addDays(plan.start, di) + 'T12:00:00').toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'short' })}</h3><span class="mono small"><b>${r0(tot.kcal)}</b> kcal · ${r0(tot.protein)}g protein · ${r0(tot.fibre)}g fibre</span></div>
+    ${(() => { const m = planDayMiss(day, plan.kcal || num(S.settings.kcal) || 2000, plan.prot || proteinTarget()); return m ? `<p class="small" style="color:var(--tl-r)">Off target: ${esc(m.miss.join('; '))}. Tap Swap on a meal to rebalance, or make a new plan.</p>` : ''; })()}
     ${p ? `<div class="mixbar" style="height:10px"><span class="g" style="width:${p.g}%"></span><span class="y" style="width:${p.y}%"></span><span class="o" style="width:${p.o}%"></span></div><span class="small muted">${mixLine(mix)}</span>` : ''}
     <div>${day.meals.map((m, mi) => `<div class="pmeal">
       <div class="h"><span class="stack" style="gap:2px"><span class="eyebrow">${esc(m.type)}${m.mins ? ' · ' + r0(m.mins) + ' min' : ''}</span><b>${esc(m.name)}</b></span><span class="mono small" style="text-align:right;white-space:nowrap"><b>${r0(m.kcal)}</b> kcal<br><span class="muted">${r0(m.protein)}g protein</span></span></div>
