@@ -17,7 +17,7 @@ Glen Anderson's own Noom-style weight-loss and nutrition app (formerly "Basket t
 
 ## Releasing a change
 1. Edit `index.html`.
-2. Bump the footer label `<span class="mono">Version N</span>` (search for `Version `) and `VERSION` in `sw.js` (`nourished-vN`) to the same N. Current: **13**.
+2. Bump the footer label `<span class="mono">Version N</span>` (search for `Version `) and `VERSION` in `sw.js` (`nourished-vN`) to the same N. Current: **14**.
 3. Syntax-check the main script (extract the last `<script>` block and run `node --check`).
 4. Test headlessly with Playwright (Chromium is at `/opt/pw-browsers/chromium`): serve files via `page.route`, stub `https://api.anthropic.com/v1/messages` (responses are **streamed SSE**) and `world.openfoodfacts.org`.
 5. Commit and push. Glen closes and reopens the app to pick it up and can confirm the version number at the bottom of the Home screen.
@@ -42,10 +42,10 @@ Glen Anderson's own Noom-style weight-loss and nutrition app (formerly "Basket t
 - **Plain shopping names:** receipts store a `generic` name; "Add my recent shopping" asks Claude once per product for any without one (`plainNames()`), with an offline `roughName()` fallback.
 
 ## Design
-Forest green `--leaf` and saffron `--olive` on soft stone, Bricolage Grotesque headings, Atkinson Hyperlegible body text. Photo-led home: hero (grain bowl), three photo cards (Log a meal, Scan food, Meal plan), then a grouped "Your tools" list. Light and dark themes via tokens. Photos came from Canva; Glen downloaded and attached them because Claude's workspace couldn't download from Canva.
+Forest green `--leaf` and saffron `--olive` on soft stone, Bricolage Grotesque headings, Atkinson Hyperlegible body text. Photo-led home: hero (grain bowl), three photo cards (Log a meal, Scan food, Meal plan), then a grouped "Your tools" list. The first four "Your tools" rows (What can I make?, My recipes, Weigh in, Log exercise) use small photo thumbnails (`.ic.ph`, 168px JPEGs generated with Canva AI image generation in v14); the rest still use line icons. Light and dark themes via tokens. Photos came from Canva; Glen downloaded and attached them because Claude's workspace couldn't download from Canva.
 
 ## Ideas and open items
-- Photos for the list tools (eaten out, shopping, pantry, exercise, ingredients) if Glen supplies them.
+- Photos for the remaining list tools (Eaten out, Scan a receipt, Pantry, My goals): Claude can generate them with the Canva connector (`generate-image`; the job result includes a 200px PNG, enough for a 42px tile).
 - Household profiles (several people on one phone).
 - Play Store version: wrap with PWABuilder (Trusted Web Activity). Needs a small server holding the API key (Cloudflare Workers or Firebase Functions), Google sign-in (Firebase Auth), Play Billing, per-user fair-use limits, shared product database to cut cost. Suggested price £3.99–£4.99/month or £29.99/year.
 - Not possible on the web: live supermarket prices (no public feeds), Health Connect step counts (native app only; screenshot import is the workaround). Strava's API would work from the web but Pacer doesn't sync to it.
