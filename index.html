@@ -610,7 +610,7 @@ a.btn{text-decoration:none}
     <!-- PROGRESS -->
     <section id="v-progress" class="stack" hidden></section>
   </main>
-  <p class="disclaim">Estimates only. Not medical or dietetic advice. <span class="mono">Version 11</span></p>
+  <p class="disclaim">Estimates only. Not medical or dietetic advice. <span class="mono">Version 12</span></p>
 </div>
 
 <nav class="tabs" aria-label="Sections">
@@ -1210,6 +1210,7 @@ function exerciseCard(day) {
     <div class="row" style="justify-content:space-between"><h3>Exercise</h3>${tot ? `<span class="mono small">${r0(tot)} kcal burned</span>` : ''}</div>
     ${list.length ? `<div>${list.map(x => `<div class="exrow"><span>${esc(x.name)} <span class="muted small">· ${r0(num(x.mins))} min</span></span><span class="row" style="gap:12px"><b class="mono">${r0(num(x.kcal))} kcal</b><button class="linkbtn del" data-act="delex" data-id="${esc(x.id)}">Delete</button></span></div>`).join('')}</div>
       <p class="small muted">${earnBack() > 0 ? `<b class="mono">+${earned} kcal</b> added to today's food allowance (${earnBack() === 1 ? 'all' : 'half'} of what you burned).` : `Not added to your food allowance, so it speeds up your weight loss.`}</p>` : `<p class="small muted">Log a walk, a gym session or a game of football. ${earnBack() > 0 ? `${earnBack() === 1 ? 'All' : 'Half'} of the calories go on top of your food allowance.` : 'It counts towards faster weight loss.'}</p>`}
+    ${exShotHTML(day)}
     <div class="exform">
       <label class="f wide">Activity<select id="ex-type">${EX.map(e => `<option value="${e[0]}">${esc(e[1])}</option>`).join('')}</select></label>
       <label class="f">Minutes<input type="number" id="ex-mins" inputmode="numeric" min="1" max="600" placeholder="30"></label>
@@ -1217,6 +1218,77 @@ function exerciseCard(day) {
       <p class="small muted wide" id="ex-hint">${kg ? '' : 'Add a weigh-in for more accurate estimates. '}Leave calories blank to estimate, or enter the figure from your watch.</p>
       <button class="btn wide" data-act="addex">Add exercise</button>
     </div></div>`;
+}
+/* exercise from a screenshot (Pacer, a watch app, Health Connect...) read by Claude */
+const exShot = { items: null, busy: false, err: '' };
+function exShotHTML(day) {
+  const it = exShot.items;
+  if (it && it.length) {
+    return `<div class="stack" id="ex-shot" style="gap:6px;padding:10px;border:1px solid var(--line);border-radius:11px">
+      <b class="small">From your screenshot</b>
+      ${it.map((x, i) => `<div class="exrow" style="align-items:flex-start">
+        <label style="display:flex;gap:8px;align-items:flex-start;cursor:pointer"><input type="checkbox" data-exon="${i}" ${x.on ? 'checked' : ''} style="accent-color:var(--leaf);margin-top:3px;width:18px;height:18px">
+        <span>${esc(x.name)} <span class="muted small">· ${r0(num(x.mins))} min${x.steps ? ' · ' + r0(x.steps).toLocaleString('en-GB') + ' steps' : ''}${x.date !== day ? ' · ' + esc(niceDay(x.date)) : ''}</span>${x.dup ? '<br><span class="small muted">Looks like it is already logged.</span>' : ''}</span></label>
+        <span class="row" style="gap:4px;flex-wrap:nowrap;flex:none"><input type="number" data-exkcal="${i}" inputmode="numeric" min="0" max="3000" value="${r0(num(x.kcal))}" aria-label="Calories for ${esc(x.name)}" style="width:76px;text-align:right"><span class="small muted">kcal</span></span>
+      </div>`).join('')}
+      ${it.some(x => x.overlap) ? `<p class="small muted">Your activity level in My goals already allows for some everyday walking, so step calories may be partly counted twice. Untick them, or lower the calories, if you'd rather be safe.</p>` : ''}
+      <div class="row"><button class="btn" data-act="exshotadd">Add ticked</button><button class="btn ghost" data-act="exshotcancel">Cancel</button></div>
+    </div>`;
+  }
+  return `<div class="stack" style="gap:6px">
+    <input type="file" id="ex-file" accept="image/*" multiple hidden>
+    <button class="btn ghost" data-act="exshot" ${exShot.busy ? 'disabled' : ''}>${exShot.busy ? '<span class="spin"></span> Reading your screenshot…' : 'Add from a screenshot'}</button>
+    ${exShot.err ? `<p class="status err">${esc(exShot.err)}</p>` : `<p class="small muted">Screenshot your day or a workout in Pacer, or your watch app, and Claude logs it for you.</p>`}
+  </div>`;
+}
+function niceDay(d) { try { return new Date(d + 'T12:00').toLocaleDateString('en-GB', { weekday: 'short', day: 'numeric', month: 'short' }); } catch (e) { return d; } }
+async function readExShot(picked) {
+  if (!picked.length) return;
+  if (!apiKey()) { exShot.err = errMsg({ code: 'no_key' }); return renderAll(); }
+  exShot.busy = true; exShot.err = ''; renderAll();
+  try {
+    const imgs = [];
+    for (const f of picked.slice(0, 3)) imgs.push(await shrinkPhoto(f));
+    const today = iso(new Date());
+    const prompt = `These are screenshots from a fitness or step-counting app (often Pacer on Android, or a watch app). Today is ${today}; the day being logged is ${S.day}.
+List the exercise they show so it can be added to a food diary.
+- A workout or tracked session (walk, run, cycle, gym, class...) is one item, with its own duration and calories.
+- A daily summary with only steps is one item named "Walking (steps)", with the active minutes and the calories the app shows. If a screenshot has both a daily step total and workouts that are part of it, list the workouts and only the steps NOT covered by them, so nothing is counted twice.
+- Use the calories figure the app shows. If it shows none, use null.
+- If the same activity appears in two screenshots, list it once.
+- "date" is the day the screenshot is for, as YYYY-MM-DD, using today's date to work out the year or words like "Today" and "Yesterday". Use null if you can't tell.
+- "type" is the closest of: ${EX.map(e => e[0] + ' (' + e[1] + ')').join(', ')}.
+Return JSON: {"found": boolean, "problem": string or null, "items": [{"name": short name like "Morning walk", "type": one of the types, "date": "YYYY-MM-DD" or null, "mins": number, "kcal": number or null, "steps": number or null, "everyday": true if it is just daily steps rather than a workout}]}`;
+    const res = await ask(prompt, imgs, { maxTokens: 2000 });
+    const raw = (res && Array.isArray(res.items)) ? res.items : [];
+    const ok = d => /^\d{4}-\d{2}-\d{2}$/.test(d || '') && d <= today && d >= addDays(today, -30);
+    const kg = latestWeight();
+    const items = raw.filter(x => x && (num(x.mins) > 0 || num(x.kcal) > 0)).slice(0, 8).map(x => {
+      const type = EXM[x.type] ? x.type : (x.everyday ? 'walk' : 'other');
+      const mins = Math.max(0, Math.round(num(x.mins)));
+      const kcal = numN(x.kcal) != null ? Math.max(0, Math.round(num(x.kcal))) : exKcal(type, mins, kg);
+      const date = ok(x.date) ? x.date : S.day;
+      const name = String(x.name || EXM[type][1]).slice(0, 60);
+      const dup = exOn(date).some(e => e.name === name && (Math.abs(num(e.mins) - mins) <= 1 || Math.abs(num(e.kcal) - kcal) < 5));
+      return { name, type, date, mins, kcal, steps: numN(x.steps), overlap: !!x.everyday && num(S.settings.activity) > 1.2, dup, on: !dup };
+    });
+    if (!items.length) throw { code: 'none', problem: res && res.problem };
+    exShot.items = items;
+  } catch (e) {
+    exShot.err = e && e.code === 'none' ? (e.problem || "Couldn't find any exercise in that screenshot. Try one that shows the steps or workout with its calories.") : errMsg(e);
+  }
+  exShot.busy = false; renderAll();
+  const c = $('#ex-card'); if (c) c.scrollIntoView({ block: 'start' });
+}
+async function addExShot() {
+  const add = (exShot.items || []).filter(x => x.on && x.kcal > 0);
+  if (!add.length) return toast('Tick at least one activity with calories.');
+  for (const x of add) await put('exercise', { id: newId(), date: x.date, type: x.type, name: x.name, mins: x.mins, kcal: x.kcal, steps: x.steps || undefined, src: 'screenshot', at: Date.now() });
+  const kcal = add.reduce((a, x) => a + x.kcal, 0), other = add.filter(x => x.date !== S.day).length;
+  exShot.items = null; exShot.err = '';
+  toast(`Exercise logged: ${kcal} kcal${other ? ` (${other} on another day)` : ''}.`);
+  renderAll();
+  const c = $('#ex-card'); if (c) c.scrollIntoView({ block: 'center' });
 }
 function updateExHint() {
   const t = $('#ex-type'), m = $('#ex-mins'), h = $('#ex-hint'); if (!t || !h) return;
@@ -3082,6 +3154,9 @@ document.addEventListener('click', async e => {
     setPlanView('book'); go('plan'); renderBookEdit(); return;
   }
   if (a === 'addex') return addExercise();
+  if (a === 'exshot') { const f = $('#ex-file'); if (f) { f.value = ''; f.click(); } return; }
+  if (a === 'exshotadd') return addExShot();
+  if (a === 'exshotcancel') { exShot.items = null; return renderAll(); }
   if (a === 'delex') { await remove('exercise', t.dataset.id); toast('Exercise deleted.'); return renderAll(); }
   if (a === 'delweight') { await remove('weights', t.dataset.id); toast('Weigh-in deleted.'); return renderAll(); }
   if (a === 'planday') { S.planDay = +t.dataset.i; return renderPlan(); }
@@ -3099,6 +3174,9 @@ document.addEventListener('click', async e => {
 document.addEventListener('input', e => {
   if (e.target.id === 'bc-g') bcSum(); if (e.target.id === 'p-q') { S.pantryQ = e.target.value; renderPantry(); } if (e.target.id === 'ex-mins' || e.target.id === 'ex-type') updateExHint(); if (e.target.id === 'rb-q') { book.q = e.target.value; renderBook(); } });
 document.addEventListener('change', async e => {
+  if (e.target.id === 'ex-file') return readExShot([...e.target.files]);
+  if (e.target.dataset && e.target.dataset.exon != null) { const x = (exShot.items || [])[+e.target.dataset.exon]; if (x) x.on = e.target.checked; return; }
+  if (e.target.dataset && e.target.dataset.exkcal != null) { const x = (exShot.items || [])[+e.target.dataset.exkcal]; if (x) x.kcal = Math.max(0, Math.round(num(e.target.value))); return; }
   if (e.target.id && e.target.id.startsWith('hp-')) { const i = +e.target.id.slice(3); const f = $('#hf-' + i); if (f) f.innerHTML = haveFigures(i); return; }
   if (e.target.dataset && e.target.dataset.boost) { const i = +e.target.dataset.boost.split('-')[0]; const f = $('#hf-' + i); if (f) f.innerHTML = haveFigures(i); return; }
   if (e.target.dataset && e.target.dataset.shop != null) {
