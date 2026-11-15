@@ -433,7 +433,7 @@ a.btn{text-decoration:none}
         <button class="pcard noph" data-act="menu" data-to="pantry"><span class="pico"><svg viewBox="0 0 24 24"><path d="M5 8h14l-1.3 11a1.5 1.5 0 0 1-1.5 1.3H7.8a1.5 1.5 0 0 1-1.5-1.3z"/><path d="M9 8V6a3 3 0 0 1 6 0v2"/></svg></span><span class="t"><b>Pantry</b><span>What you've bought</span></span></button>
         <button class="pcard noph" data-act="menu" data-to="settings"><span class="pico"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="8"/><circle cx="12" cy="12" r="4"/><circle cx="12" cy="12" r=".8" fill="currentColor"/></svg></span><span class="t"><b>My goals</b><span>Weight, calorie target, units</span></span></button>
       </div>
-      <div class="card tip"><span class="ic"><svg viewBox="0 0 24 24"><path d="M9 18h6M10 21h4"/><path d="M12 3a6 6 0 0 0-3.5 10.9c.6.5 1 1.2 1 2V16h5v-.1c0-.8.4-1.5 1-2A6 6 0 0 0 12 3z"/></svg></span><div class="stack" style="gap:3px"><p class="eyebrow">Today's tip</p><p id="h-tip"></p></div></div>
+      <div class="card tip"><span class="ic"><svg viewBox="0 0 24 24"><path d="M9 18h6M10 21h4"/><path d="M12 3a6 6 0 0 0-3.5 10.9c.6.5 1 1.2 1 2V16h5v-.1c0-.8.4-1.5 1-2A6 6 0 0 0 12 3z"/></svg></span><div class="stack" style="gap:3px"><p class="eyebrow">Today's tip</p><div id="h-tip" class="stack" style="gap:8px"></div></div></div>
     </section>
 
     <!-- TODAY -->
@@ -656,7 +656,7 @@ a.btn{text-decoration:none}
     <!-- PROGRESS -->
     <section id="v-progress" class="stack" hidden></section>
   </main>
-  <p class="disclaim">Estimates only. Not medical or dietetic advice. <span class="mono">Version 18</span></p>
+  <p class="disclaim">Estimates only. Not medical or dietetic advice. <span class="mono">Version 19</span></p>
 </div>
 
 <nav class="tabs" aria-label="Sections">
@@ -729,7 +729,7 @@ a.btn{text-decoration:none}
     <label class="f">Foods to avoid
       <input type="text" id="set-dislikes" placeholder="e.g. mushrooms, coriander">
     </label>
-    <p class="small muted">Calorie targets use the Mifflin-St Jeor formula. They're a starting point, so adjust after a few weeks of weigh-ins. Check with your GP before a big change in diet, especially if you take medication.</p>
+    <p class="small muted">Calorie targets use the Mifflin-St Jeor formula. They're a starting point, so adjust after a few weeks of weigh-ins. Your protein target is 1.2g per kg of your goal weight, the low end of the 1.2 to 1.6g/kg range that studies link with keeping muscle while losing weight (Leidy et al., <i>Am J Clin Nutr</i> 2015) and the top of the 1.0 to 1.2g/kg advised for over-65s (PROT-AGE, Bauer et al., <i>JAMDA</i> 2013). The UK minimum for adults is 0.75g/kg. Check with your GP before a big change in diet, especially if you take medication.</p>
     <button class="btn" id="save-settings">Save my goals</button>
     <hr style="border:0;border-top:1px solid var(--line);width:100%">
     <div class="stack" style="gap:8px">
@@ -1371,6 +1371,69 @@ const TIPS = [
   'Porridge oats and beans contain soluble fibre, which helps keep cholesterol down.',
   'Bulk out pasta, curry and chilli with extra veg. Same-size plate, fewer calories.'
 ];
+
+/* ---------- today's tip, built from the day's log ---------- */
+// Vegetarian sources, since that's how Glen eats.
+const TIP_FOODS = {
+  protein: 'Greek yoghurt or skyr, eggs, tofu, Quorn, cottage cheese, edamame, lentils or beans',
+  fibre: 'beans, lentils, chickpeas, porridge oats, wholegrain bread, berries, or an extra portion of veg',
+  both: 'beans, lentils, chickpeas or edamame, which are high in both'
+};
+function daysSince(d) { return d ? Math.round((new Date(iso(new Date()) + 'T12:00:00') - new Date(d + 'T12:00:00')) / 864e5) : null; }
+function lastExerciseDate() { const l = Object.values(S.exercise).map(x => x.date).filter(Boolean).sort(); return l.length ? l[l.length - 1] : null; }
+function reminderURL() {
+  // Google Calendar "add event" link: a repeating daily event whose alert does the reminding (no server needed)
+  const d = new Date(); if (d.getHours() * 60 + d.getMinutes() >= 9 * 60 + 30) d.setDate(d.getDate() + 1);
+  const ymd = iso(d).replace(/-/g, '');
+  const q = new URLSearchParams({
+    action: 'TEMPLATE', text: 'Log your first meal on Nourished',
+    details: 'Open Nourished and log your first meal of the day: ' + location.href.split('#')[0].split('?')[0],
+    dates: `${ymd}T093000/${ymd}T094000`, recur: 'RRULE:FREQ=DAILY',
+    ctz: Intl.DateTimeFormat().resolvedOptions().timeZone || 'Europe/London'
+  });
+  return 'https://calendar.google.com/calendar/render?' + q.toString();
+}
+function dayTip() {
+  const today = iso(new Date()), h = new Date().getHours();
+  const meals = mealsOn(today), { t } = dayTotals(today), target = dayTarget(today);
+  const out = { main: '', act: null, extra: [] };
+  if (!meals.length) {
+    out.main = h < 11 ? "Nothing logged yet today. Start with breakfast: logging your first meal early makes the rest of the day easier to plan."
+      : h < 17 ? "Nothing logged yet today. Log what you've eaten so far, even a rough guess, and the app can steer the rest of your day."
+      : "Nothing logged today yet. It's not too late: add what you've eaten, a rough guess is far better than a blank day.";
+    out.act = ['meal', 'Log a meal'];
+    if (!S.settings.reminderSet) out.reminder = true;
+  } else if (t.kcal > target) {
+    out.main = `You're ${r0(t.kcal - target).toLocaleString('en-GB')} kcal over today's budget. That's OK: a blow-out now and then doesn't undo a good week. Log it honestly and get back on track with ${h < 17 ? 'your next meal' : 'tomorrow’s breakfast'}.`;
+  } else {
+    // how far through the day's calories you are sets how much protein and fibre you'd expect by now
+    const share = Math.min(1, t.kcal / target), pT = proteinTarget(), fT = 30;
+    const lowP = share >= 0.2 && t.protein < pT * share * 0.8, lowF = share >= 0.2 && t.fibre < fT * share * 0.8;
+    const pace = `with ${r0(share * 100)}% of today's calories eaten`;
+    if (lowP && lowF) out.main = `You're behind on protein (${r0(t.protein)}g of ${pT}g) and fibre (${r0(t.fibre)}g of ${fT}g) ${pace}. Bulk up your next meal with ${TIP_FOODS.both}.`;
+    else if (lowP) out.main = `You're behind on protein: ${r0(t.protein)}g of your ${pT}g ${pace}. Add ${TIP_FOODS.protein} to your next meal. Protein keeps you fuller for longer.`;
+    else if (lowF) out.main = `You're behind on fibre: ${r0(t.fibre)}g of 30g ${pace}. Add ${TIP_FOODS.fibre}. Fibre fills you up and helps keep cholesterol down.`;
+    else if (t.sat > RI.sat) out.main = `Saturated fat is at ${r0(t.sat)}g, over the 20g daily reference. For the rest of today, go for beans, veg, oats and lower-fat dairy over cheese, butter and pastry.`;
+    else {
+      const doy = Math.floor((Date.now() - new Date(new Date().getFullYear(), 0, 0)) / 864e5);
+      out.main = (share >= 0.2 ? `On track: ${r0(target - t.kcal).toLocaleString('en-GB')} kcal left, with protein and fibre keeping pace. ` : '') + TIPS[doy % TIPS.length];
+    }
+  }
+  const wd = daysSince((weightList().slice(-1)[0] || {}).date);
+  if (wd == null) out.extra.push(["You haven't logged a weigh-in yet. One every week or two shows how your plan is working.", 'weigh', 'Weigh in']);
+  else if (wd >= 28) out.extra.push([`It's been ${Math.floor(wd / 7)} weeks since your last weigh-in. Step on the scales so your progress and calorie target stay up to date.`, 'weigh', 'Weigh in']);
+  const ed = daysSince(lastExerciseDate());
+  if (ed == null || ed > 7) out.extra.push([`${ed == null ? 'No exercise logged yet.' : `No exercise logged for ${ed} days.`} Being active is a great way to reach your goals, and a brisk walk counts.`, 'exercise', 'Log exercise']);
+  return out;
+}
+function dayTipHTML() {
+  const d = dayTip();
+  const btn = (to, label) => `<button class="btn ghost sm" data-act="menu" data-to="${to}">${label}</button>`;
+  let html = `<p>${esc(d.main)}</p>`;
+  if (d.act || d.reminder) html += `<div class="row" style="gap:8px;flex-wrap:wrap">${d.act ? btn(...d.act) : ''}${d.reminder ? `<a class="btn ghost sm" href="${esc(reminderURL())}" target="_blank" rel="noopener" data-act="reminder">Remind me daily</a>` : ''}</div>`;
+  for (const [text, to, label] of d.extra) html += `<div class="row" style="gap:10px;justify-content:space-between;align-items:center;border-top:1px solid var(--line);padding-top:8px"><span class="small">${esc(text)}</span>${btn(to, label)}</div>`;
+  return html;
+}
 
 /* ---------- toast ---------- */
 let toastT;
@@ -3120,7 +3183,7 @@ async function makePlan() {
   const kcal = num(S.settings.kcal) || 2000, prot = proteinTarget();
   const extra = $('#pl-ask').value.trim();
   const prompt = `Create a ${n}-day meal plan for a UK adult who is losing weight steadily, and looking after their liver and cholesterol.
-Daily calorie target: ${kcal} kcal. Each day's meals must add up to within 60 kcal of it. Protein at least ${prot} g a day. Fibre at least 30 g a day.
+Daily calorie target: ${kcal} kcal. Each day's meals must add up to within 60 kcal of it. Protein at least ${prot} g a day, spread across the day: about ${Math.round(prot * 0.28)} g at each main meal and ${Math.round(prot * 0.16)} g in the snack. ${PROTEIN_SOURCES[S.settings.diet] || PROTEIN_SOURCES.any} Fibre at least 30 g a day. Add up each day's kcal, protein and fibre before you answer and fix any day that misses.
 Make it filling for the calories: each day's food (not drinks) should average about 1.25 kcal per gram as eaten or less (the World Cancer Research Fund goal), built mostly on light foods (under 1.5 kcal per gram as eaten: vegetables, salad, fruit, broth and lentil soups, cooked beans and lentils, fat-free yoghurt, skyr, cottage cheese), with dense foods (over 4 kcal per gram: oil, butter, nuts, seeds, hard cheese, granola, chocolate) in measured amounts. Favour high-protein, high-fibre, slow-release foods: oats, pulses, eggs, wholegrains, soya. Little added sugar, saturated fat and salt. No medical claims.
 ${planContext()}
 Each day has breakfast, lunch, dinner and one snack. Weekday dinners take ${mins} minutes or less; lunches 15 minutes or less or leftovers. Reuse ingredients across days to cut waste and cost, and batch-cook where it makes sense (e.g. "Leftover lentil chilli from day 2"). Plain UK supermarket ingredients with gram amounts for one person.
@@ -3132,12 +3195,54 @@ Reply with ONLY this JSON:
   try {
     const res = await ask(prompt);
     if (!res || !Array.isArray(res.days) || !res.days.length) throw { code: 'empty_completion' };
-    const plan = { id: 'current', start: iso(new Date()), kcal, created: Date.now(), tip: String(res.tip || ''),
-      days: res.days.slice(0, n).map(d => ({ meals: (d.meals || []).map(cleanPlanMeal) })),
+    const days = res.days.slice(0, n).map(d => ({ meals: (d.meals || []).map(cleanPlanMeal) }));
+    await fixPlanDays(days, kcal, prot, st);
+    const plan = { id: 'current', start: iso(new Date()), kcal, prot, created: Date.now(), tip: String(res.tip || ''),
+      days,
       shopping: (res.shopping || []).map(x => ({ item: String(x.item || x), have: !!x.have })) };
     await put('plans', plan);
     S.planDay = 0; done(); renderPlan();
   } catch (e) { done(errMsg(e)); }
+}
+const PROTEIN_SOURCES = {
+  any: 'Get protein from lean sources: eggs, Greek yoghurt or skyr, cottage cheese, fish, chicken, beans, lentils, tofu.',
+  pescatarian: 'Get protein from eggs, Greek yoghurt or skyr, cottage cheese, fish and seafood, beans, lentils, tofu, edamame.',
+  vegetarian: 'They are vegetarian and sometimes eat vegan protein. Get protein from Quorn, tofu, tempeh, lentils, beans, chickpeas, edamame, eggs, Greek yoghurt or skyr, cottage cheese, high-protein soya yoghurt; mix plant proteins (e.g. lentils with wholegrains) through the day.',
+  vegan: 'Get protein from tofu, tempeh, seitan, soya mince, edamame, lentils, beans, chickpeas, soya yoghurt and soya milk; mix plant proteins through the day.'
+};
+// how a planned day compares with the targets: null if it's fine
+function planDayMiss(day, kcal, prot) {
+  const t = { kcal: 0, protein: 0, fibre: 0 }; day.meals.forEach(m => { t.kcal += num(m.kcal); t.protein += num(m.protein); t.fibre += num(m.fibre); });
+  const miss = [];
+  if (Math.abs(t.kcal - kcal) > 100) miss.push(`${r0(t.kcal)} kcal instead of ${kcal}`);
+  if (t.protein < prot * 0.95) miss.push(`${r0(t.protein)} g protein, short of ${prot} g`);
+  if (t.fibre < 27) miss.push(`${r0(t.fibre)} g fibre, short of 30 g`);
+  return miss.length ? { t, miss } : null;
+}
+// one round of asking Claude to rework any day that misses the calorie, protein or fibre targets
+async function fixPlanDays(days, kcal, prot, st) {
+  const bad = days.map((d, i) => ({ i, m: planDayMiss(d, kcal, prot) })).filter(x => x.m);
+  if (!bad.length) return;
+  if (st) st.innerHTML = `<span class="spin"></span><span>Checking the numbers: reworking ${bad.length} day${bad.length === 1 ? '' : 's'} to hit your calorie, protein and fibre targets…</span>`;
+  const prompt = `Some days of a UK weight-loss meal plan miss their targets. Every day must be within 60 kcal of ${kcal} kcal, with at least ${prot} g protein and at least 30 g fibre.
+${PROTEIN_SOURCES[S.settings.diet] || PROTEIN_SOURCES.any}
+${planContext()}
+Keep each day's meal types (breakfast, lunch, dinner, snack) and keep the meals close to the originals where you can: adjust portions, add a protein or fibre side, or swap one meal. Keep it filling for the calories (mostly light foods under 1.5 kcal per gram as eaten). Add up the totals before you answer.
+Days to fix:
+${bad.map(b => `Day ${b.i + 1} (${b.m.miss.join('; ')}): ${days[b.i].meals.map(m => `${m.type}: ${m.name} (${r0(m.kcal)} kcal, ${r0(m.protein)} g protein, ${r0(m.fibre)} g fibre)`).join('; ')}`).join('\n')}
+Reply with ONLY this JSON, one entry per day listed above:
+{"days": [{"day": day number, "meals": [${PLAN_SHAPE}]}]}`;
+  try {
+    const res = await ask(prompt);
+    for (const d of (res && res.days) || []) {
+      const i = num(d.day) - 1;
+      if (!bad.some(b => b.i === i) || !Array.isArray(d.meals) || !d.meals.length) continue;
+      const fixed = { meals: d.meals.map(cleanPlanMeal) };
+      // only take the new day if it's closer to the targets than the old one
+      const score = x => { const m = planDayMiss(x, kcal, prot); return m ? Math.abs(m.t.kcal - kcal) / 50 + Math.max(0, prot - m.t.protein) + Math.max(0, 30 - m.t.fibre) : 0; };
+      if (score(fixed) < score(days[i])) days[i] = fixed;
+    }
+  } catch (e) { /* keep the first plan; the day view flags what's off */ }
 }
 function cleanPlanMeal(m) {
   const o = { type: String(m.type || 'Meal'), name: String(m.name || 'Meal'), mins: num(m.mins),
@@ -3163,6 +3268,7 @@ function renderPlan() {
   body.innerHTML = `<div class="daychips" role="group" aria-label="Plan day">${chips}</div>
   <div class="card stack">
     <div class="row" style="justify-content:space-between;align-items:baseline"><h3>${new Date(addDays(plan.start, di) + 'T12:00:00').toLocaleDateString('en-GB', { weekday: 'long', day: 'numeric', month: 'short' })}</h3><span class="mono small"><b>${r0(tot.kcal)}</b> kcal · ${r0(tot.protein)}g protein · ${r0(tot.fibre)}g fibre</span></div>
+    ${(() => { const m = planDayMiss(day, plan.kcal || num(S.settings.kcal) || 2000, plan.prot || proteinTarget()); return m ? `<p class="small" style="color:var(--tl-r)">Off target: ${esc(m.miss.join('; '))}. Tap Swap on a meal to rebalance, or make a new plan.</p>` : ''; })()}
     ${p ? `<div class="mixbar" style="height:10px"><span class="g" style="width:${p.g}%"></span><span class="y" style="width:${p.y}%"></span><span class="o" style="width:${p.o}%"></span></div><span class="small muted">${mixLine(mix)}</span>` : ''}
     <div>${day.meals.map((m, mi) => `<div class="pmeal">
       <div class="h"><span class="stack" style="gap:2px"><span class="eyebrow">${esc(m.type)}${m.mins ? ' · ' + r0(m.mins) + ' min' : ''}</span><b>${esc(m.name)}</b></span><span class="mono small" style="text-align:right;white-space:nowrap"><b>${r0(m.kcal)}</b> kcal<br><span class="muted">${r0(m.protein)}g protein</span></span></div>
@@ -3234,8 +3340,7 @@ function renderHome() {
   const left = dayTarget(today) - t.kcal;
   const cur = latestWeight(), goal = num(S.settings.goalWeight);
   $('#h-stats').innerHTML = `<span class="mono">${r0(Math.abs(left))} kcal ${left >= 0 ? 'left' : 'over'}</span><span>${n} meal${n === 1 ? '' : 's'} today</span>${cur && goal ? `<span class="mono">${fmtWd(Math.max(0, cur - goal))} to go</span>` : ''}`;
-  const doy = Math.floor((Date.now() - new Date(new Date().getFullYear(), 0, 0)) / 864e5);
-  $('#h-tip').textContent = TIPS[doy % TIPS.length];
+  $('#h-tip').innerHTML = dayTipHTML();
   $('#h-setup').innerHTML = (!apiKey() ? `<div class="card stack"><h3>Connect Claude</h3><p class="small muted">Add your Anthropic API key to read receipts, labels and meal photos, make meal plans and search for recipes. Barcodes, weigh-ins and exercise work without it.</p><button class="btn ghost" data-act="menu" data-to="settings">Add my key</button></div>` : '') + (goal && cur ? '' : `<div class="card stack" style="border-color:var(--leaf)"><h3>Set your weight goal</h3><p class="small muted">Enter your height, weight and goal and the app will work out a daily calorie target that loses weight steadily.</p><button class="btn" data-act="menu" data-to="settings">Set my goals</button></div>`);
 }
 
@@ -3250,6 +3355,7 @@ document.addEventListener('click', async e => {
   if (t.dataset.pf) { S.pantryFilter = t.dataset.pf; return renderPantry(); }
   const a = t.dataset.act;
   if (!a && t.dataset.tab) return go(t.dataset.tab);
+  if (a === 'reminder') { S.settings.reminderSet = true; saveSettings(); setTimeout(renderHome, 800); return; }
   if (a === 'menu') {
     const to = t.dataset.to;
     if (to === 'settings') return openSettings();
@@ -3531,7 +3637,7 @@ $('#bc-start').onclick = startBarcode;
 $('#bc-stop').onclick = () => { stopBarcode(); bcSay(''); };
 $('#bc-look').onclick = () => lookupBarcode($('#bc-code').value);
 $('#bc-code').addEventListener('keydown', e => { if (e.key === 'Enter') lookupBarcode($('#bc-code').value); });
-document.addEventListener('visibilitychange', () => { if (document.hidden) stopBarcode(); });
+document.addEventListener('visibilitychange', () => { if (document.hidden) stopBarcode(); else if (S.mode !== 'loading') renderHome(); });
 
 /* ---------- install as an app ---------- */
 let installEvt = null;
