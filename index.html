@@ -119,6 +119,16 @@ button,input,select,textarea{font:inherit;color:inherit}
 label.f{display:flex;flex-direction:column;gap:5px;font-size:.85rem;color:var(--muted);font-weight:700;min-width:0}
 input[type=text],input[type=number],input[type=date],input[type=search],input[type=url],select,textarea{background:var(--surface);border:1px solid var(--line);border-radius:10px;padding:9px 11px;width:100%;min-width:0;color:var(--ink);font-weight:400;font-size:1rem}
 textarea{min-height:84px;resize:vertical}
+/* Voice dictation (v23) */
+.micw{position:relative;display:block;min-width:0;width:100%}
+.micw:has(> [hidden]){display:none}
+.micw > input,.micw > textarea{padding-right:46px}
+.micb{position:absolute;right:5px;top:50%;transform:translateY(-50%);width:36px;height:36px;border:0;border-radius:50%;background:var(--leaf-soft);color:var(--leaf);display:grid;place-items:center;cursor:pointer;padding:0;-webkit-tap-highlight-color:transparent}
+.micw.ta .micb{top:6px;transform:none}
+.micb svg{width:19px;height:19px}
+.micb.on{background:var(--beet);color:#fff;animation:micpulse 1.2s ease-in-out infinite}
+@keyframes micpulse{0%,100%{box-shadow:0 0 0 0 rgba(163,50,79,.45)}50%{box-shadow:0 0 0 7px rgba(163,50,79,0)}}
+@media (prefers-reduced-motion:reduce){.micb.on{animation:none}}
 .grid2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
 .grid4{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
 @media (max-width:400px){.grid4{grid-template-columns:repeat(2,1fr)}}
@@ -680,7 +690,7 @@ a.btn{text-decoration:none}
     <!-- PROGRESS -->
     <section id="v-progress" class="stack" hidden></section>
   </main>
-  <p class="disclaim">Estimates only. Not medical or dietetic advice. <span class="mono">Version 22</span></p>
+  <p class="disclaim">Estimates only. Not medical or dietetic advice. <span class="mono">Version 23</span></p>
 </div>
 
 <nav class="tabs" aria-label="Sections">
@@ -4056,6 +4066,108 @@ renderAll();
 document.querySelectorAll('[data-density-help]').forEach(el => { el.innerHTML = densityHelpHTML(); });
 document.querySelectorAll('[data-guide]').forEach(el => { el.innerHTML = guideHTML(); });
 initStore().then(() => { renderAll(); initSample(); takeShare(); });
+
+/* ---------- VOICE DICTATION (v23) ----------
+   A mic button on every free-text field. Speech goes into the field for editing; nothing is ever submitted.
+   Hidden where the browser has no Web Speech API. */
+const SpeechRec = window.SpeechRecognition || window.webkitSpeechRecognition;
+const MIC_SVG = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3"/></svg>';
+const STOP_SVG = '<svg viewBox="0 0 24 24" aria-hidden="true"><rect x="7" y="7" width="10" height="10" rx="2" fill="currentColor"/></svg>';
+let dict = null; // {rec, el, btn, before, after, stopped}
+function micEligible(el) {
+  if (el.dataset.mic) return false;
+  if (el.closest('.micw')) return false;
+  if (el.tagName === 'TEXTAREA') return true;
+  const t = (el.getAttribute('type') || 'text').toLowerCase();
+  if (t !== 'text' && t !== 'search') return false;
+  if (el.inputMode === 'numeric' || el.inputMode === 'decimal') return false;
+  return true;
+}
+function addMics(root) {
+  if (!SpeechRec) return;
+  (root || document).querySelectorAll('textarea, input').forEach(el => {
+    if (!micEligible(el)) return;
+    el.dataset.mic = '1';
+    const w = document.createElement('span');
+    w.className = 'micw' + (el.tagName === 'TEXTAREA' ? ' ta' : '');
+    if (el.classList.contains('wide')) w.classList.add('wide');
+    if (el.style.flex) { w.style.flex = el.style.flex; }
+    el.parentNode.insertBefore(w, el); w.appendChild(el);
+    const b = document.createElement('button');
+    b.type = 'button'; b.className = 'micb'; b.innerHTML = MIC_SVG;
+    b.setAttribute('aria-label', 'Speak instead of typing');
+    b.addEventListener('pointerdown', e => e.preventDefault()); // keep the field's cursor
+    b.addEventListener('click', e => { e.preventDefault(); e.stopPropagation(); toggleDictation(el, b); });
+    w.appendChild(b);
+    if (dict && dict.id && dict.id === el.id && !dict.el.isConnected) { // field was redrawn (search boxes) mid-dictation
+      dict.el = el; dict.btn = b; b.classList.add('on'); b.innerHTML = STOP_SVG; b.setAttribute('aria-label', 'Stop listening');
+    }
+  });
+}
+function joinSpeech(a, b) {
+  if (!b) return a;
+  if (!a) return b;
+  return /\s$/.test(a) || /^\s/.test(b) ? a + b : a + ' ' + b;
+}
+function speechText(results) {
+  // Chrome on Android can repeat the whole phrase so far in each result; keep the longest version.
+  const parts = [];
+  for (let i = 0; i < results.length; i++) {
+    const t = results[i][0].transcript.trim(); if (!t) continue;
+    const last = parts[parts.length - 1];
+    if (last != null && t.toLowerCase().startsWith(last.toLowerCase())) parts[parts.length - 1] = t;
+    else if (last != null && last.toLowerCase().startsWith(t.toLowerCase())) continue;
+    else parts.push(t);
+  }
+  return parts.join(' ');
+}
+function stopDictation() {
+  if (!dict) return;
+  const d = dict; dict = null; d.stopped = true;
+  d.btn.classList.remove('on'); d.btn.innerHTML = MIC_SVG; d.btn.setAttribute('aria-label', 'Speak instead of typing');
+  try { d.rec.stop(); } catch (e) {}
+}
+function toggleDictation(el, btn) {
+  if (dict && dict.el === el) { stopDictation(); return; }
+  stopDictation();
+  const rec = new SpeechRec();
+  rec.lang = navigator.language || 'en-GB';
+  rec.continuous = true; rec.interimResults = true; rec.maxAlternatives = 1;
+  const pos = el.selectionStart != null && document.activeElement === el ? el.selectionStart : el.value.length;
+  const d = dict = { rec, el, btn, id: el.id, before: el.value.slice(0, pos), after: el.value.slice(pos), stopped: false };
+  btn.classList.add('on'); btn.innerHTML = STOP_SVG; btn.setAttribute('aria-label', 'Stop listening');
+  rec.onresult = e => {
+    if (!d.el.isConnected) addMics();
+    if (!d.el.isConnected) { stopDictation(); return; }
+    const el = d.el;
+    const said = speechText(e.results);
+    const head = joinSpeech(d.before, said);
+    el.value = head + (d.after && !/^\s/.test(d.after) && said ? ' ' : '') + d.after;
+    try { el.setSelectionRange(head.length, head.length); } catch (err) {}
+    el.dispatchEvent(new Event('input', { bubbles: true }));
+    if (!el.isConnected) addMics();
+  };
+  rec.onerror = e => {
+    if (e.error === 'not-allowed' || e.error === 'service-not-allowed') toast('Allow the microphone for Nourished to speak instead of typing (Chrome: site settings → Microphone).');
+    else if (e.error === 'no-speech') toast('Didn’t catch anything. Tap the mic and try again.');
+    else if (e.error === 'network') toast('Speech needs an internet connection.');
+    else if (e.error !== 'aborted') toast('Voice input stopped. Tap the mic to try again.');
+  };
+  rec.onend = () => {
+    if (dict === d) stopDictation();
+    if (d.el.isConnected) d.el.dispatchEvent(new Event('change', { bubbles: true }));
+  };
+  try { rec.start(); } catch (e) { stopDictation(); toast('Voice input isn’t available right now.'); }
+}
+if (SpeechRec) {
+  addMics();
+  let micQ = false;
+  new MutationObserver(() => {
+    if (micQ) return; micQ = true;
+    requestAnimationFrame(() => { micQ = false; addMics(); });
+  }).observe(document.body, { childList: true, subtree: true });
+  document.addEventListener('visibilitychange', () => { if (document.hidden) stopDictation(); });
+}
 })();
 </script>
 </body>
