@@ -727,7 +727,7 @@ a.btn{text-decoration:none}
     <!-- PROGRESS -->
     <section id="v-progress" class="stack" hidden></section>
   </main>
-  <p class="disclaim">Estimates only. Not medical or dietetic advice. <span class="mono">Version 28</span></p>
+  <p class="disclaim">Estimates only. Not medical or dietetic advice. <span class="mono">Version 29</span></p>
 </div>
 
 <nav class="tabs" aria-label="Sections">
@@ -2521,6 +2521,7 @@ function setScan(mode) {
   $('#p-barcode').hidden = mode !== 'barcode';
   if (mode !== 'barcode') stopBarcode();
   if (mode === 'label') fillLabelSelect();
+  navLater();
 }
 
 /* ---------- SCAN: barcode ---------- */
@@ -3914,7 +3915,7 @@ function takeShare() {
   const p = new URLSearchParams(location.search);
   const parts = ['url', 'text', 'title'].map(k => p.get(k) || '');
   if (!parts.some(Boolean)) return;
-  try { history.replaceState(null, '', location.pathname); } catch (e) {}
+  try { history.replaceState(history.state, '', location.pathname); } catch (e) {}
   const url = parts.map(firstUrl).find(Boolean) || '';
   const rest = [parts[2], parts[1]].filter(Boolean).join('\n').replace(url, '').trim();
   setPlanView('book'); go('plan');
@@ -4120,6 +4121,7 @@ function setPlanView(v) {
   $('#pv-week').hidden = v !== 'week'; $('#pv-ideas').hidden = v !== 'ideas'; $('#pv-have').hidden = v !== 'have'; $('#pv-book').hidden = v !== 'book';
   if (v === 'book') renderBook();
   if (v === 'have' && !$('#h-staples').value) $('#h-staples').value = S.settings.staples || 'onions, carrots, garlic, olive oil, dried herbs and spices, stock cubes';
+  navLater();
 }
 
 function renderAccount() {}
@@ -4132,6 +4134,7 @@ function go(tab) {
   document.querySelectorAll('.tabs [data-tab]').forEach(b => b.dataset.tab === tab ? b.setAttribute('aria-current', 'page') : b.removeAttribute('aria-current'));
   if (tab === 'scan' && scanMode === 'label') fillLabelSelect();
   window.scrollTo(0, 0);
+  navLater();
 }
 function renderAll() {
   $('#mode').textContent = 'On this phone';
@@ -4185,11 +4188,12 @@ document.addEventListener('click', async e => {
   }
   if (a === 'go') { go(t.dataset.tab); if (t.dataset.tab === 'scan') setScan('receipt'); return; }
   if (a === 'day') { const n = +t.dataset.n; const nd = addDays(S.day, n); if (nd <= iso(new Date())) { S.day = nd; S.calMonth = null; exShot.items = null; renderToday(); } return; }
-  if (a === 'cal') { S.calOpen = !S.calOpen; S.calMonth = null; renderToday(); return; }
+  if (a === 'cal') { S.calOpen = !S.calOpen; S.calMonth = null; renderToday(); navSub('cal', S.calOpen); return; }
   if (a === 'calmonth') { S.calMonth = t.dataset.ym; renderToday(); return; }
   if (a === 'pickday') {
     const d = t.dataset.d; if (!d || d > iso(new Date())) return;
     S.day = d; S.calOpen = false; S.calMonth = null; exShot.items = null;
+    navSub('cal', false);
     renderToday(); if (S.tab !== 'today') go('today'); else window.scrollTo({ top: 0, behavior: 'smooth' });
     return;
   }
@@ -4464,6 +4468,73 @@ window.addEventListener('beforeinstallprompt', e => { e.preventDefault(); instal
 window.addEventListener('appinstalled', () => { installEvt = null; $('#h-install').hidden = true; toast('Installed. Open Nourished from your home screen.'); });
 async function doInstall() { if (!installEvt) return; installEvt.prompt(); try { await installEvt.userChoice; } catch (e) {} installEvt = null; $('#h-install').hidden = true; }
 if ('serviceWorker' in navigator && location.protocol === 'https:') navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' }).then(r => r.update()).catch(() => {});
+
+/* ---------- Android back button (v27) ----------
+   Every screen change (tab, Scan mode, Plan view) adds a history entry, and so does opening a sheet or the calendar,
+   so the phone's back button steps back through the app: it closes an open sheet first, then returns to the last screen.
+   History starts as [root, home]. Going to Home jumps back to that home entry, so Home is the bottom of the stack.
+   Backing off Home lands on root: the app shows "Press back again to exit" and, for 2 seconds, leaves nothing to go
+   back to inside the app, so a second press closes it. After 2 seconds the home entry is put back. */
+const NAV_SUBS = { msheet: closeMealSheet, sheet: () => $('#close-settings').click(), rsheet: closeCopySheet, cal: () => { S.calOpen = false; renderToday(); } };
+const nav = { timer: null, pending: 0, wantFlush: false, exitT: null };
+function navScreen() { return { tab: S.tab, scan: scanMode, pv: S.planView }; }
+function navKey(x) { return x.tab + (x.tab === 'scan' ? ':' + x.scan : '') + (x.tab === 'plan' ? ':' + x.pv : ''); }
+function navSubOpen(id) { return id === 'cal' ? !!S.calOpen : !$('#' + id).hidden; }
+function navPush(entry) {
+  const st = history.state;
+  if (st && st.nv) history.replaceState({ ...st, y: window.scrollY }, '');
+  if (st && st.root) { clearTimeout(nav.exitT); history.pushState({ nv: 1, d: 1, tab: 'home', scan: scanMode, pv: S.planView }, ''); }
+  const cur = history.state || { d: 0 };
+  history.pushState({ nv: 1, d: (cur.d || 0) + 1, ...entry }, '');
+}
+// called by go(), setScan() and setPlanView(); runs once after the current click so go('scan') + setScan('meal') add one entry
+function navLater() { if (!nav.quiet && !nav.timer) nav.timer = setTimeout(navFlush, 0); }
+function navFlush() {
+  nav.timer = null;
+  if (nav.pending) { nav.wantFlush = true; return; }
+  const st = history.state, now = navScreen();
+  if (st && st.nv && !st.sub && !st.root && navKey(st) === navKey(now)) return;
+  if (now.tab === 'home' && st && st.nv && !st.root && st.d > 1 && !Object.keys(NAV_SUBS).some(navSubOpen)) {
+    nav.pending++; history.go(1 - st.d); return; // back to the home entry
+  }
+  if (st && st.root && now.tab === 'home') { clearTimeout(nav.exitT); history.pushState({ nv: 1, d: 1, ...now }, ''); return; }
+  navPush(now);
+}
+// a sheet or the calendar opened or closed
+function navSub(id, open) {
+  const st = history.state;
+  if (open) { if (!(st && st.sub === id)) navPush({ ...navScreen(), sub: id }); }
+  else if (st && st.sub === id) { nav.pending++; nav.ignore = (nav.ignore || 0) + 1; history.back(); }
+}
+function navApply(st) {
+  if (st.tab === 'plan' && st.pv && st.pv !== S.planView) setPlanView(st.pv);
+  if (st.tab === 'scan' && st.scan && st.scan !== scanMode) setScan(st.scan);
+  if (S.tab !== st.tab) go(st.tab);
+  if (st.y) window.scrollTo(0, st.y);
+}
+window.addEventListener('popstate', e => {
+  const st = e.state;
+  if (nav.pending) nav.pending--;
+  if (nav.ignore) { nav.ignore--; if (!nav.pending && nav.wantFlush) { nav.wantFlush = false; navFlush(); } return; }
+  if (!st || !st.nv) return;
+  // close whatever sheet the entry we left had open (or any left open with no entry of its own)
+  for (const id of Object.keys(NAV_SUBS)) if (st.sub !== id && navSubOpen(id)) NAV_SUBS[id]();
+  if (st.sub && !navSubOpen(st.sub)) { nav.pending++; history.back(); return; } // a sheet already closed: skip its entry
+  if (st.root) {
+    if (S.tab !== 'home') { nav.quiet = true; go('home'); nav.quiet = false; }
+    toast('Press back again to exit');
+    clearTimeout(nav.exitT);
+    nav.exitT = setTimeout(() => { if (history.state && history.state.root) history.pushState({ nv: 1, d: 1, ...navScreen() }, ''); }, 2000);
+    return;
+  }
+  navApply(st);
+  if (!nav.pending && nav.wantFlush) { nav.wantFlush = false; navFlush(); }
+});
+['msheet', 'sheet', 'rsheet'].forEach(id => new MutationObserver(() => navSub(id, !$('#' + id).hidden)).observe($('#' + id), { attributes: true, attributeFilter: ['hidden'] }));
+try {
+  history.replaceState({ nv: 1, d: 0, root: true, ...navScreen() }, '');
+  history.pushState({ nv: 1, d: 1, ...navScreen() }, '');
+} catch (e) {}
 
 /* ---------- boot ---------- */
 setRin('photo'); setMin('plate');
