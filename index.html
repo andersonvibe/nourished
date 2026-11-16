@@ -140,6 +140,16 @@ textarea{min-height:84px;resize:vertical}
 .quick{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
 @media (max-width:420px){.quick{grid-template-columns:repeat(2,1fr)}}
 .meal[data-act]{cursor:pointer}
+.slots{display:flex;flex-direction:column;gap:10px}
+.slot{border:1px solid var(--line);border-radius:14px;padding:10px 12px}
+.slot.empty{padding-block:6px}
+.slot .meal:last-child{padding-bottom:2px}
+.slothd{display:flex;align-items:center;gap:10px}
+.slothd h4{margin:0;font-family:var(--f-display);font-size:1.02rem;flex:0 0 auto}
+.slothd>span{flex:1;min-width:0}
+.slot .meal:first-child{border-top:1px solid var(--line);padding-top:12px;margin-top:8px}
+.addslot{display:inline-flex;align-items:center;gap:4px;flex:0 0 auto}
+.addslot svg{width:16px;height:16px;fill:none;stroke:currentColor;stroke-width:2.4;stroke-linecap:round}
 .meal .items{grid-column:1/-1;font-size:.84rem;color:var(--muted);overflow-wrap:anywhere}
 .ing.rm{grid-template-columns:1fr 78px 38px}
 .ing .x{width:38px;height:38px;border:1px solid var(--line);background:var(--surface);border-radius:10px;cursor:pointer;color:var(--muted);font-size:1.2rem;line-height:1}
@@ -717,7 +727,7 @@ a.btn{text-decoration:none}
     <!-- PROGRESS -->
     <section id="v-progress" class="stack" hidden></section>
   </main>
-  <p class="disclaim">Estimates only. Not medical or dietetic advice. <span class="mono">Version 26</span></p>
+  <p class="disclaim">Estimates only. Not medical or dietetic advice. <span class="mono">Version 28</span></p>
 </div>
 
 <nav class="tabs" aria-label="Sections">
@@ -1774,21 +1784,11 @@ function renderToday() {
   </div>`;
 
   html += `<div class="card stack" id="meals-card">
-    <div class="row" style="justify-content:space-between"><h3>Meals</h3>${meals.length ? `<span class="mono small">${r0(t.kcal)} kcal</span>` : ''}</div>
-    ${meals.length ? `<div>${meals.map(m => {
-      const ings = m.ingredients || [];
-      return `<div class="meal" data-act="editmeal" data-id="${esc(m.id)}" role="button" tabindex="0" aria-label="Edit ${esc(m.name)}">
-        <span class="nm">${esc(m.name)}</span><span class="kc">${r0(num(m.nut && m.nut.kcal))} kcal</span>
-        ${ings.length > 1 ? `<span class="items">${esc(ings.map(g => g.name).join(', '))}</span>` : ''}
-        <div class="sub"><span>${esc(m.type || '')}</span>${mixDots(mealMix(m))}${m.source === 'out' ? `<span class="chip ${m.published ? 'g' : 'a'}">Eaten out${m.venue ? ' · ' + esc(m.venue) : ''}${m.published ? ' · menu kcal' : ''}</span>` : ''}
-          <span class="mono">${m.cost ? gbp(m.cost) : 'no price'}${m.unpriced ? ' · ' + m.unpriced + ' unpriced' : ''}</span>
-          <span class="mono">P ${r0(num(m.nut.protein))}g · C ${r0(num(m.nut.carbs))}g · F ${r0(num(m.nut.fat))}g</span>
-          <button class="linkbtn" data-act="editmeal" data-id="${esc(m.id)}">Edit or add food</button>
-          ${isRegular(m) ? '' : `<button class="linkbtn" data-act="regpin" data-id="${esc(m.id)}">Save as a regular</button>`}
-          <button class="linkbtn del" data-act="delmeal" data-id="${esc(m.id)}">Delete</button></div>
-      </div>`; }).join('')}</div>` : `<p class="small muted">Nothing logged ${isToday ? 'yet today' : 'on this day'}. Tap a meal once it's logged to change it or add more food to it.</p>`}
+    <div class="row" style="justify-content:space-between"><h3>Meals and drinks</h3>${meals.length ? `<span class="mono small">${r0(t.kcal)} kcal</span>` : ''}</div>
+    <p class="small muted" style="margin-top:-6px">Add as many foods and drinks to each meal as you like. Tap anything logged to change it.</p>
+    <div class="slots">${mealSlots(meals, isToday)}</div>
     ${regularStrip(day)}
-    <p class="small muted" style="margin-bottom:-4px">Add a meal${isToday ? '' : ' for this day'}</p>
+    <p class="small muted" style="margin-bottom:-4px">Or add${isToday ? '' : ' to this day'} by</p>
     <div class="quick">
       <button class="btn ghost sm" data-act="addmeal" data-m="plate">Photo</button>
       <button class="btn ghost sm" data-act="addmeal" data-m="text">Describe it</button>
@@ -2018,7 +2018,7 @@ function weightChart(l, goal, proj) {
 // Range and meal filter sit in one row above everything they change. Days count once they're over; today and
 // days under half the calorie target (probably not fully logged, as in loggedDays()) are left out of averages.
 const DASH_RANGES = [['week', 'Week', 7], ['month', 'Month', 30], ['quarter', 'Quarter', 91], ['year', 'Year', 365]];
-const DASH_MEALS = [['all', 'All'], ['Breakfast', 'Breakfast'], ['Lunch', 'Lunch'], ['Dinner', 'Dinner'], ['Snack', 'Snacks']];
+const DASH_MEALS = [['all', 'All'], ['Breakfast', 'Breakfast'], ['Lunch', 'Lunch'], ['Dinner', 'Dinner'], ['Snack', 'Snacks'], ['Drink', 'Drinks']];
 const FIBRE_TARGET = 30; // g a day, UK SACN 2015 (same as Today's fibre bar)
 function dashData(range, meal) {
   const n = (DASH_RANGES.find(r => r[0] === range) || DASH_RANGES[1])[2];
@@ -2028,7 +2028,7 @@ function dashData(range, meal) {
   const dayInfo = d => {
     const ms = byDay[d] || [], tg = dayTarget(d), sum = (list, k) => list.reduce((a, m) => a + num(m.nut && m.nut[k]), 0);
     const all = sum(ms, 'kcal'), pick = meal === 'all' ? ms : ms.filter(m => m.type === meal);
-    const split = {}; for (const m of ms) { const t = ['Breakfast', 'Lunch', 'Dinner'].includes(m.type) ? m.type : 'Snack'; split[t] = (split[t] || 0) + num(m.nut && m.nut.kcal); }
+    const split = {}; for (const m of ms) { const t = ['Breakfast', 'Lunch', 'Dinner', 'Drink'].includes(m.type) ? m.type : 'Snack'; split[t] = (split[t] || 0) + num(m.nut && m.nut.kcal); }
     const mix = { g: 0, y: 0, o: 0 }; for (const m of ms) { const x = mealMix(m); mix.g += num(x.g); mix.y += num(x.y); mix.o += num(x.o); }
     const pm = {}; for (const m of ms) pm[m.type] = (pm[m.type] || 0) + num(m.nut && m.nut.protein);
     return { d, ms, logged: ms.length > 0, full: ms.length > 0 && all >= tg * 0.5, all, kcal: sum(pick, 'kcal'), tg, protein: sum(ms, 'protein'), fibre: sum(ms, 'fibre'), sat: sum(ms, 'sat'), sugars: sum(ms, 'sugars'), salt: sum(ms, 'salt'), split, mix, pm };
@@ -2084,7 +2084,7 @@ function dashData(range, meal) {
 function dashHTML() {
   const range = S.dashRange || 'month', meal = S.dashMeal || 'all', D = dashData(range, meal);
   const rName = { week: 'week', month: 'month', quarter: 'quarter', year: 'year' }[range];
-  const mName = meal === 'all' ? 'all meals' : meal === 'Snack' ? 'snacks' : meal.toLowerCase();
+  const mName = meal === 'all' ? 'all meals' : typeName(meal);
   const fmtK = v => v == null ? '–' : r0(v).toLocaleString('en-GB');
   const controls = `<div class="stack" style="gap:8px">
     <div class="seg dseg" role="group" aria-label="Time range">${DASH_RANGES.map(([k, l]) => `<button data-act="drange" data-v="${k}" aria-pressed="${k === range}">${l}</button>`).join('')}</div>
@@ -2125,12 +2125,12 @@ function dashHTML() {
     ${D.wChange != null ? `<p class="small" style="border-top:1px solid var(--line);padding-top:10px"><b>Weight this ${rName}:</b> <span class="mono">${D.wChange <= 0 ? '−' : '+'}${fmtWd(Math.abs(D.wChange))}</span> <span class="muted">across ${D.wCount} weigh-ins</span></p>` : ''}
   </div>`;
   // where the calories come from: meals and food balance
-  const sp = D.split, tot = ['Breakfast', 'Lunch', 'Dinner', 'Snack'].reduce((a, k) => a + (sp[k] || 0), 0);
+  const sp = D.split, tot = MEAL_TYPES.reduce((a, k) => a + (sp[k] || 0), 0);
   const mixTot = D.mix.g + D.mix.y + D.mix.o;
   const stack = (parts, label) => `<div class="dstack" role="img" aria-label="${esc(label)}">${parts.filter(p => p[1] > 0).map(p => `<span style="flex:${p[1]};background:${p[2]}"></span>`).join('')}</div>
     <div class="dleg">${parts.map(p => `<span><i style="background:${p[2]}"></i>${p[0]} <b class="mono">${p[3]}</b></span>`).join('')}</div>`;
   if (tot > 0) {
-    const mp = [['Breakfast', sp.Breakfast || 0, 'var(--olive)'], ['Lunch', sp.Lunch || 0, 'var(--c-g)'], ['Dinner', sp.Dinner || 0, 'var(--leaf)'], ['Snacks', sp.Snack || 0, 'var(--beet)']].map(p => [...p, fmtK(p[1])]);
+    const mp = [['Breakfast', sp.Breakfast || 0, 'var(--olive)'], ['Lunch', sp.Lunch || 0, 'var(--c-g)'], ['Dinner', sp.Dinner || 0, 'var(--leaf)'], ['Snacks', sp.Snack || 0, 'var(--beet)'], ['Drinks', sp.Drink || 0, 'var(--c-y)']].map(p => [...p, fmtK(p[1])]);
     html += `<div class="card stack"><h3>Where your calories come from</h3>
       <p class="small muted" style="margin-top:-8px">Average kcal a day by meal</p>
       ${stack(mp, mp.map(p => `${p[0]} ${p[3]} kcal`).join(', '))}
@@ -2154,7 +2154,7 @@ function dashTips(D) {
   const out = [], F = D.full, n = F.length, k = v => r0(v).toLocaleString('en-GB');
   if (n < 3) return out;
   const avgOf = (list, f) => list.length ? list.reduce((a, x) => a + f(x), 0) / list.length : 0;
-  const MEALS = ['Breakfast', 'Lunch', 'Dinner', 'Snack'], mName = m => m === 'Snack' ? 'snacks' : m.toLowerCase();
+  const MEALS = MEAL_TYPES, mName = typeName;
   // 1. going over: which meal grows on the over days?
   const over = F.filter(x => x.all > x.tg), ok = F.filter(x => x.all <= x.tg);
   if (over.length / n > 0.3) {
@@ -2162,7 +2162,8 @@ function dashTips(D) {
     for (const m of MEALS) { const d = avgOf(over, x => x.split[m] || 0) - avgOf(ok.length ? ok : F, x => x.split[m] || 0); if (d > wd) { wd = d; worst = m; } }
     out.push({ pri: 90, title: `You went over on ${over.length} of ${n} days`,
       why: `On those days you ate ${k(avgOf(over, x => x.all - x.tg))} kcal over on average${worst && wd > 80 ? `, and most of the extra came at ${mName(worst)} (${k(wd)} kcal more than on your on-target days)` : ''}.`,
-      fix: worst === 'Snack' ? 'Plan your snacks: keep a filling one ready (fruit, skyr, a small handful of nuts) so you\'re not reaching for whatever is nearby.'
+      fix: worst === 'Drink' ? 'Look at what you drink on those days: swap sugary drinks, juice and alcohol for water, sparkling water, or tea and coffee without sugar.'
+        : worst === 'Snack' ? 'Plan your snacks: keep a filling one ready (fruit, skyr, a small handful of nuts) so you\'re not reaching for whatever is nearby.'
         : `Plan ${worst ? mName(worst) : 'your biggest meal'} ahead, fill half the plate with veg or salad, and serve the dense parts (pasta, rice, cheese, sauces) in a measured portion.`,
       src: ['nhsTips', 'rolls'] });
   }
@@ -2275,7 +2276,7 @@ function kcalChart(D) {
   const lastI = pts.map(p => p.v != null).lastIndexOf(true);
   const tipOf = p => p.v == null ? `${p.label}: not fully logged` : `${p.label}: ${r0(p.v).toLocaleString('en-GB')} kcal${D.n > 31 ? ' a day' : ''}${showTg && p.tg ? ` · target ${r0(p.tg).toLocaleString('en-GB')}` : ''}`;
   const hitW = (W - L - R) / Math.max(1, nx - 1);
-  const title = D.meal === 'all' ? 'Calories a day' : `Calories a day · ${D.meal === 'Snack' ? 'snacks' : D.meal.toLowerCase()}`;
+  const title = D.meal === 'all' ? 'Calories a day' : `Calories a day · ${typeName(D.meal)}`;
   return `<div class="card stack chartbox"><div class="row" style="justify-content:space-between"><h3>${title}</h3><span class="small muted">${D.n > 31 ? 'weekly averages' : 'each day'}</span></div>
     <p class="small mono dread" id="kc-read" aria-live="polite">${esc(lastI >= 0 ? tipOf(pts[lastI]) : 'Tap the chart to see a day')}</p>
     <svg viewBox="0 0 ${W} ${H}" role="img" aria-label="${esc(title)} over the last ${D.n} days${showTg ? ', with your calorie target as a red line' : ''}">
@@ -2603,7 +2604,7 @@ function renderBarcode() {
     <div class="lights"><span class="chip n"><span class="dot ${dens}"></span>${{ g: 'Light', y: 'Medium', o: 'Dense' }[dens]} · ${r1(k100 / 100)} kcal/g</span>${lightsHTML(per)}</div>
     <div class="grid2">
       <label class="f">How much did you have? (g)<input type="number" id="bc-g" inputmode="decimal" min="1" step="1" value="${r0(def)}"></label>
-      <label class="f">Meal<select id="bc-type">${['Breakfast', 'Lunch', 'Dinner', 'Snack'].map(t => `<option ${t === mealTypeNow() ? 'selected' : ''}>${t}</option>`).join('')}</select></label>
+      <label class="f">Meal<select id="bc-type">${typeOpts(mealTypeNow())}</select></label>
     </div>
     <div class="plain" id="bc-sum"></div>
     <div class="row"><button class="btn" data-act="bclog">Log it</button><button class="btn ghost" data-act="bcmore">Add other food to this meal</button>${r.productId ? '' : '<button class="btn ghost" data-act="bcsave">Save to pantry</button>'}</div>
@@ -2818,7 +2819,7 @@ function ingFrom(x, fallback) {
   return { name: String(x.name || fallback), grams: Math.max(0, num(x.grams)), productId: x.productId && S.products[x.productId] ? x.productId : null, per100: Object.fromEntries(NUT.map(k => [k, num(x.per100 && x.per100[k])])), eaten100: num(x.eaten100) || null, drink: x.drink === true };
 }
 function newMealRes(source, ings, name) {
-  return { name: name || '', servings: 1, eaten: 1, confidence: source === 'barcode' ? 'high' : 'medium', note: '', source, ingredients: ings || [], date: S.day, type: mealTypeNow() };
+  return { name: name || '', servings: 1, eaten: 1, confidence: source === 'barcode' ? 'high' : 'medium', note: '', source, ingredients: ings || [], date: S.day, type: newMealType(ings) };
 }
 function clearMealReview() {
   if (bcStream) stopBarcode();
@@ -2889,7 +2890,7 @@ Give typical per-100g values for every ingredient as bought, even when it matche
     takeEstimate({
       name: String(res.name || 'Meal'), servings: Math.max(num(res.servings) || 1, 1), eaten: 1,
       confidence: ['low', 'medium', 'high'].includes(res.confidence) ? res.confidence : 'medium', note: res.note || '',
-      source: min, date: S.day, type: mealTypeNow(),
+      source: min, date: S.day, type: newMealType(res.ingredients.map(x => ingFrom(x, 'Ingredient'))),
       ingredients: res.ingredients.map(x => ingFrom(x, 'Ingredient'))
     });
     done(); renderMealReview();
@@ -2924,7 +2925,7 @@ List the dish's main components, 3–12 of them (e.g. pizza base, mozzarella, to
     const ings = res.ingredients.map(x => ingFrom(x, 'Component'));
     const published = publishedFrom(res, ings);
     takeEstimate({
-      name: String(res.name || 'Meal out'), servings: 1, eaten: 1, source: 'out', date: S.day, type: mealTypeNow(),
+      name: String(res.name || 'Meal out'), servings: 1, eaten: 1, source: 'out', date: S.day, type: addType || mealTypeNow(),
       venue: res.venue ? String(res.venue) : (res.chain ? String(res.chain) : ''), price: numN(res.price), priceNote: res.priceNote || '',
       confidence: ['low', 'medium', 'high'].includes(res.confidence) ? res.confidence : 'low', note: res.note || '',
       keep: { published }, ingredients: ings
@@ -2970,6 +2971,14 @@ function publishedHTML(p) {
     <span class="muted">Components below are sized to match. Change "How much you ate" if you didn't finish it. ${p.url ? `<a href="${esc(p.url)}" target="_blank" rel="noopener">Source: ${esc(urlHost(p.url) || 'link')}</a>` : ''}</span></div>`;
 }
 function mealTypeNow() { const h = new Date().getHours(); return h < 11 ? 'Breakfast' : h < 15 ? 'Lunch' : h < 21 ? 'Dinner' : 'Snack'; }
+// Meal slots on Today, in order. 'Drink' (v28) is for drinks on their own; drinks with a meal stay in that meal.
+const MEAL_TYPES = ['Breakfast', 'Lunch', 'Dinner', 'Snack', 'Drink'];
+const TYPE_PLURAL = { Breakfast: 'Breakfast', Lunch: 'Lunch', Dinner: 'Dinner', Snack: 'Snacks', Drink: 'Drinks' };
+const typeName = t => t === 'Snack' ? 'snacks' : t === 'Drink' ? 'drinks' : String(t || '').toLowerCase();
+const typeOpts = sel => MEAL_TYPES.map(t => `<option value="${t}" ${t === sel ? 'selected' : ''}>${t}</option>`).join('');
+let addType = null; // the slot picked with Today's "Add to breakfast" etc. buttons
+// Type for a new entry: the slot it was added from, else Drink if everything in it is a drink, else by time of day
+function newMealType(ings) { return addType || (ings && ings.length && ings.every(g => g.drink) ? 'Drink' : mealTypeNow()); }
 function renderMealReview() {
   const box = $('#m-review'); box.hidden = false;
   if (bcStream) stopBarcode();
@@ -2989,7 +2998,7 @@ function renderMealReview() {
       <label class="f">How much you ate<select id="mr-eat">${[[1, 'All of it'], [0.75, 'Three quarters'], [0.5, 'Half (shared)'], [0.33, 'A third'], [0.25, 'A quarter']].map(([v, t]) => `<option value="${v}" ${num(r.eaten) === v ? 'selected' : ''}>${t}</option>`).join('')}</select></label>`
       : `<label class="f">Recipe makes (servings)<input type="number" inputmode="decimal" step="0.5" min="1" id="mr-serv" value="${r.servings}"></label>
       <label class="f">Servings you ate<input type="number" inputmode="decimal" step="0.5" min="0.25" id="mr-eat" value="${r.eaten}"></label>`}
-      <label class="f">Meal<select id="mr-type">${['Breakfast', 'Lunch', 'Dinner', 'Snack'].map(t => `<option ${t === (r.type || mealTypeNow()) ? 'selected' : ''}>${t}</option>`).join('')}</select></label>
+      <label class="f">Meal<select id="mr-type">${typeOpts(r.type || mealTypeNow())}</select></label>
       <label class="f">Date<input type="date" id="mr-date" value="${esc(r.date || S.day)}"></label>
     </div>
     ${out && r.priceNote ? `<p class="small muted">Price from the bill: ${esc(r.priceNote)}</p>` : ''}
@@ -3159,6 +3168,32 @@ function regulars(withHidden) {
     .sort((a, b) => (b.type === now) - (a.type === now) || b.days.size - a.days.size || (b.head.m.date).localeCompare(a.head.m.date));
 }
 function isRegular(m) { mealGroups(); const g = regCache.bySig[mealSig(m)]; return !!g && (g.days.size >= 2 || g.pinned) && !g.hidden; }
+// Today's Meals card: one section per meal slot, each with its own entries and an "Add" button
+function mealRow(m) {
+  const ings = m.ingredients || [];
+  return `<div class="meal" data-act="editmeal" data-id="${esc(m.id)}" role="button" tabindex="0" aria-label="Edit ${esc(m.name)}">
+    <span class="nm">${esc(m.name)}</span><span class="kc">${r0(num(m.nut && m.nut.kcal))} kcal</span>
+    ${ings.length > 1 ? `<span class="items">${esc(ings.map(g => g.name).join(', '))}</span>` : ''}
+    <div class="sub">${mixDots(mealMix(m))}${m.source === 'out' ? `<span class="chip ${m.published ? 'g' : 'a'}">Eaten out${m.venue ? ' · ' + esc(m.venue) : ''}${m.published ? ' · menu kcal' : ''}</span>` : ''}
+      <span class="mono">${m.cost ? gbp(m.cost) : 'no price'}${m.unpriced ? ' · ' + m.unpriced + ' unpriced' : ''}</span>
+      <span class="mono">P ${r0(num(m.nut.protein))}g · C ${r0(num(m.nut.carbs))}g · F ${r0(num(m.nut.fat))}g</span>
+      <button class="linkbtn" data-act="editmeal" data-id="${esc(m.id)}">Change</button>
+      ${isRegular(m) ? '' : `<button class="linkbtn" data-act="regpin" data-id="${esc(m.id)}">Save as a regular</button>`}
+      <button class="linkbtn del" data-act="delmeal" data-id="${esc(m.id)}">Delete</button></div>
+  </div>`;
+}
+function mealSlots(meals) {
+  const other = meals.filter(m => !MEAL_TYPES.includes(m.type));
+  const slot = (t, list, label) => {
+    const kc = list.reduce((a, m) => a + num(m.nut && m.nut.kcal), 0);
+    return `<section class="slot${list.length ? '' : ' empty'}" aria-label="${esc(label)}">
+      <div class="slothd"><h4>${esc(label)}</h4>${list.length ? `<span class="mono small">${r0(kc)} kcal</span>` : `<span class="small muted">Nothing yet</span>`}
+        ${t ? `<button class="btn ghost sm addslot" data-act="addmeal" data-type="${t}" aria-label="Add to ${typeName(t)}"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 5v14M5 12h14"/></svg>Add</button>` : ''}</div>
+      ${list.length ? `<div>${list.map(mealRow).join('')}</div>` : ''}
+    </section>`;
+  };
+  return MEAL_TYPES.map(t => slot(t, meals.filter(m => m.type === t), TYPE_PLURAL[t])).join('') + (other.length ? slot(null, other, 'Other') : '');
+}
 function regularStrip(day) {
   const regs = regulars();
   if (!regs.length) return '';
@@ -3168,7 +3203,7 @@ function regularStrip(day) {
     <button class="linkbtn" data-act="regall">See all</button></div>
     <div class="regs" role="list">${shown.map(g => { const m = g.head.m; return `<button class="reg" role="listitem" data-act="reglog" data-id="${esc(m.id)}" aria-label="Add ${esc(m.name)}, ${r0(num(m.nut.kcal))} kcal">
       <span class="rn">${esc(m.name)}</span>
-      <span class="rm"><b>${r0(num(m.nut.kcal))} kcal</b> · ${esc(g.type || '')}${g.days.size > 1 ? ` · ${g.days.size} days` : ''}</span></button>`; }).join('')}
+      <span class="rm"><b>${r0(num(m.nut.kcal))} kcal</b> · ${esc(TYPE_PLURAL[g.type] || g.type || '')}${g.days.size > 1 ? ` · ${g.days.size} days` : ''}</span></button>`; }).join('')}
       ${regs.length > shown.length ? `<button class="reg more" data-act="regall">All ${regs.length}</button>` : ''}</div>
   </div>`;
 }
@@ -3266,13 +3301,16 @@ function closeMealSheet() {
   $('#v-scan').appendChild(pm);
   pm.hidden = scanMode !== 'meal'; $('#m-head').hidden = false; $('#m-inputs').hidden = false;
   $('#msheet').hidden = true;
+  addType = null;
 }
-function addMealFrom(mode) {
+function addMealFrom(mode, type) {
   if (mealRes && mealRes.editId) clearMealReview();
+  addType = MEAL_TYPES.includes(type) ? type : null;
   $('#m-inputs').hidden = false;
-  openMealSheet(S.day === iso(new Date()) ? 'Add a meal' : 'Add a meal for ' + dayLabel(S.day));
-  if (mealRes) mealRes.date = S.day;
-  setMin(mode || (min === 'barcode' ? 'plate' : min));
+  const what = addType ? 'Add to ' + typeName(addType) : 'Add a meal';
+  openMealSheet(S.day === iso(new Date()) ? what : what + ' for ' + dayLabel(S.day));
+  if (mealRes) { mealRes.date = S.day; if (addType) { mealRes.type = addType; if ($('#mr-type')) $('#mr-type').value = addType; } }
+  setMin(mode || (addType === 'Drink' ? 'text' : min === 'barcode' ? 'plate' : min));
 }
 function editMeal(id) {
   const m = S.meals[id]; if (!m) return;
@@ -4156,7 +4194,7 @@ document.addEventListener('click', async e => {
     return;
   }
   if (a === 'logmeal') { go('scan'); setScan('meal'); return; }
-  if (a === 'addmeal') return addMealFrom(t.dataset.m);
+  if (a === 'addmeal') return addMealFrom(t.dataset.m, t.dataset.type);
   if (a === 'editmeal') return editMeal(t.dataset.id);
   if (a === 'copyfrom') return openCopySheet('copy');
   if (a === 'regall') return openCopySheet('regs');
