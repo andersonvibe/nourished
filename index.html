@@ -140,6 +140,10 @@ textarea{min-height:84px;resize:vertical}
 .quick{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
 @media (max-width:420px){.quick{grid-template-columns:repeat(2,1fr)}}
 .meal[data-act]{cursor:pointer}
+.mtseg{flex-wrap:wrap;margin-top:6px}
+.mtseg button{flex:1 1 auto;min-width:58px;padding-inline:8px}
+.updbar{position:fixed;left:12px;right:12px;bottom:calc(84px + env(safe-area-inset-bottom));z-index:60;display:flex;gap:12px;align-items:center;justify-content:space-between;padding:12px 14px;border-radius:14px;background:var(--leaf);color:#fff;box-shadow:0 8px 24px rgba(0,0,0,.25);font-size:.92rem}
+.updbar .btn{background:#fff;color:var(--leaf);flex:0 0 auto}
 .slots{display:flex;flex-direction:column;gap:10px}
 .slot{border:1px solid var(--line);border-radius:14px;padding:10px 12px}
 .slot.empty{padding-block:6px}
@@ -727,7 +731,7 @@ a.btn{text-decoration:none}
     <!-- PROGRESS -->
     <section id="v-progress" class="stack" hidden></section>
   </main>
-  <p class="disclaim">Estimates only. Not medical or dietetic advice. <span class="mono">Version 32</span></p>
+  <p class="disclaim">Estimates only. Not medical or dietetic advice. <span class="mono">Version 33</span></p>
 </div>
 
 <nav class="tabs" aria-label="Sections">
@@ -2996,6 +3000,9 @@ const MEAL_TYPES = ['Breakfast', 'Lunch', 'Dinner', 'Snack', 'Drink'];
 const TYPE_PLURAL = { Breakfast: 'Breakfast', Lunch: 'Lunch', Dinner: 'Dinner', Snack: 'Snacks', Drink: 'Drinks' };
 const typeName = t => t === 'Snack' ? 'snacks' : t === 'Drink' ? 'drinks' : String(t || '').toLowerCase();
 const typeOpts = sel => MEAL_TYPES.map(t => `<option value="${t}" ${t === sel ? 'selected' : ''}>${t}</option>`).join('');
+// Meal type buttons in the meal editor (v33: buttons, not a dropdown, so every choice, Drink included, is in view)
+const mealTypePicker = sel => `<div class="seg mtseg" role="group" aria-labelledby="mr-type-l">${MEAL_TYPES.map(t => `<button type="button" data-act="mrtype" data-v="${t}" aria-pressed="${t === sel}">${t}</button>`).join('')}</div><input type="hidden" id="mr-type" value="${esc(sel)}">`;
+function setMealTypePick(v) { if (!$('#mr-type')) return; $('#mr-type').value = v; document.querySelectorAll('.mtseg button').forEach(b => b.setAttribute('aria-pressed', b.dataset.v === v)); if (mealRes) mealRes.type = v; }
 let addType = null; // the slot picked with Today's "Add to breakfast" etc. buttons
 // Type for a new entry: the slot it was added from, else Drink if everything in it is a drink, else by time of day
 function newMealType(ings) { return addType || (ings && ings.length && ings.every(g => g.drink) ? 'Drink' : mealTypeNow()); }
@@ -3018,7 +3025,7 @@ function renderMealReview() {
       <label class="f">How much you ate<select id="mr-eat">${[[1, 'All of it'], [0.75, 'Three quarters'], [0.5, 'Half (shared)'], [0.33, 'A third'], [0.25, 'A quarter']].map(([v, t]) => `<option value="${v}" ${num(r.eaten) === v ? 'selected' : ''}>${t}</option>`).join('')}</select></label>`
       : `<label class="f">Recipe makes (servings)<input type="number" inputmode="decimal" step="0.5" min="1" id="mr-serv" value="${r.servings}"></label>
       <label class="f">Servings you ate<input type="number" inputmode="decimal" step="0.5" min="0.25" id="mr-eat" value="${r.eaten}"></label>`}
-      <label class="f">Meal<select id="mr-type">${typeOpts(r.type || mealTypeNow())}</select></label>
+      <div class="f" style="grid-column:1/-1"><span id="mr-type-l">Meal</span>${mealTypePicker(r.type || mealTypeNow())}</div>
       <label class="f">Date<input type="date" id="mr-date" value="${esc(r.date || S.day)}"></label>
     </div>
     ${out && r.priceNote ? `<p class="small muted">Price from the bill: ${esc(r.priceNote)}</p>` : ''}
@@ -3329,7 +3336,7 @@ function addMealFrom(mode, type) {
   $('#m-inputs').hidden = false;
   const what = addType ? 'Add to ' + typeName(addType) : 'Add a meal';
   openMealSheet(S.day === iso(new Date()) ? what : what + ' for ' + dayLabel(S.day));
-  if (mealRes) { mealRes.date = S.day; if (addType) { mealRes.type = addType; if ($('#mr-type')) $('#mr-type').value = addType; } }
+  if (mealRes) { mealRes.date = S.day; if (addType) { mealRes.type = addType; setMealTypePick(addType); } }
   setMin(mode || (addType === 'Drink' ? 'text' : min === 'barcode' ? 'plate' : min));
 }
 function editMeal(id) {
@@ -4218,6 +4225,7 @@ document.addEventListener('click', async e => {
   }
   if (a === 'logmeal') { go('scan'); setScan('meal'); return; }
   if (a === 'addmeal') return addMealFrom(t.dataset.m, t.dataset.type);
+  if (a === 'mrtype') return setMealTypePick(t.dataset.v);
   if (a === 'editmeal') return editMeal(t.dataset.id);
   if (a === 'copyfrom') return openCopySheet('copy');
   if (a === 'regall') return openCopySheet('regs');
@@ -4486,7 +4494,37 @@ let installEvt = null;
 window.addEventListener('beforeinstallprompt', e => { e.preventDefault(); installEvt = e; $('#h-install').hidden = false; });
 window.addEventListener('appinstalled', () => { installEvt = null; $('#h-install').hidden = true; toast('Installed. Open Nourished from your home screen.'); });
 async function doInstall() { if (!installEvt) return; installEvt.prompt(); try { await installEvt.userChoice; } catch (e) {} installEvt = null; $('#h-install').hidden = true; }
-if ('serviceWorker' in navigator && location.protocol === 'https:') navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' }).then(r => r.update()).catch(() => {});
+if ('serviceWorker' in navigator && location.protocol === 'https:') navigator.serviceWorker.register('sw.js', { updateViaCache: 'none' }).then(r => { swReg = r; r.update(); }).catch(() => {});
+
+/* ---------- updates (v33) ----------
+   An installed app on Android is usually resumed, not reloaded, so it can keep running an old version for days.
+   Each time the app comes back to the screen (at most every 2 minutes) it reads sw.js straight from the server and
+   compares its VERSION with this page's. If they differ, it reloads by itself when nothing is half-done (no meal being
+   logged or edited, no sheet open), otherwise it shows a bar with an Update button. */
+const APP_VERSION = 33; // keep in step with the footer and sw.js
+let swReg = null, updLast = 0, updShown = false;
+function busyForUpdate() { return !!(mealRes && ((mealRes.ingredients || []).length || mealRes.editId)) || ['#msheet', '#sheet', '#rsheet'].some(id => $(id) && !$(id).hidden); }
+function doUpdate() { try { sessionStorage.setItem('nourished-updated', String(Date.now())); } catch (e) {} location.reload(); }
+async function checkUpdate(force) {
+  if (location.protocol !== 'https:' || (!force && Date.now() - updLast < 120000)) return;
+  updLast = Date.now();
+  try {
+    if (swReg) swReg.update().catch(() => {});
+    const txt = await (await fetch('sw.js?check=' + Date.now(), { cache: 'no-store' })).text();
+    const live = +((txt.match(/nourished-v(\d+)/) || [])[1] || 0);
+    if (!live || live <= APP_VERSION) return;
+    let recent = 0; try { recent = +sessionStorage.getItem('nourished-updated') || 0; } catch (e) {}
+    if (!busyForUpdate() && Date.now() - recent > 60000) return doUpdate();
+    if (updShown) return;
+    updShown = true;
+    const bar = document.createElement('div'); bar.className = 'updbar'; bar.setAttribute('role', 'status');
+    bar.innerHTML = `<span>A new version of Nourished (Version ${live}) is ready.</span><button class="btn sm">Update now</button>`;
+    bar.querySelector('button').onclick = doUpdate;
+    document.body.appendChild(bar);
+  } catch (e) {}
+}
+document.addEventListener('visibilitychange', () => { if (!document.hidden) checkUpdate(); });
+setTimeout(() => checkUpdate(true), 3000);
 
 /* ---------- Android back button (v27) ----------
    Every screen change (tab, Scan mode, Plan view) adds a history entry, and so does opening a sheet or the calendar,
