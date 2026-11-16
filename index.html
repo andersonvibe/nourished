@@ -727,7 +727,7 @@ a.btn{text-decoration:none}
     <!-- PROGRESS -->
     <section id="v-progress" class="stack" hidden></section>
   </main>
-  <p class="disclaim">Estimates only. Not medical or dietetic advice. <span class="mono">Version 29</span></p>
+  <p class="disclaim">Estimates only. Not medical or dietetic advice. <span class="mono">Version 30</span></p>
 </div>
 
 <nav class="tabs" aria-label="Sections">
@@ -1673,30 +1673,49 @@ function reminderURL() {
   });
   return 'https://calendar.google.com/calendar/render?' + q.toString();
 }
+// when each meal is "late" enough to remind about it (hour of the day)
+const MEAL_DUE = [['Breakfast', 11], ['Lunch', 16], ['Dinner', 22]];
 function dayTip() {
   const today = iso(new Date()), h = new Date().getHours();
   const meals = mealsOn(today), { t } = dayTotals(today), target = dayTarget(today);
   const out = { main: '', act: null, extra: [] };
+  const has = ty => meals.some(m => m.type === ty);
+  const missing = MEAL_DUE.filter(([ty, due]) => h >= due && !has(ty)).map(x => x[0].toLowerCase());
+  const list = a => a.length < 2 ? a.join('') : a.slice(0, -1).join(', ') + ' or ' + a[a.length - 1];
   if (!meals.length) {
-    out.main = h < 11 ? "Nothing logged yet today. Start with breakfast: logging your first meal early makes the rest of the day easier to plan."
-      : h < 17 ? "Nothing logged yet today. Log what you've eaten so far, even a rough guess, and the app can steer the rest of your day."
-      : "Nothing logged today yet. It's not too late: add what you've eaten, a rough guess is far better than a blank day.";
+    out.main = h < 11 ? "Good morning. Log breakfast once you've had it, and the app can plan the rest of your day around it."
+      : h < 16 ? "No breakfast logged yet. If you've eaten, add it now, even a rough guess, so the rest of the day's advice is right."
+      : h < 22 ? "Nothing logged yet today. Add breakfast and lunch if you've had them: a rough guess beats a blank day."
+      : "Nothing logged today. It's not too late: add what you've eaten, a rough guess is far better than a blank day.";
     out.act = ['meal', 'Log a meal'];
     if (!S.settings.reminderSet) out.reminder = true;
   } else if (t.kcal > target) {
     out.main = `You're ${r0(t.kcal - target).toLocaleString('en-GB')} kcal over today's budget. That's OK: a blow-out now and then doesn't undo a good week. Log it honestly and get back on track with ${h < 17 ? 'your next meal' : 'tomorrow’s breakfast'}.`;
+  } else if (missing.length) {
+    out.main = `No ${list(missing)} logged yet. If you've eaten, add it now so today's totals and tips stay right.`;
+    out.act = ['meal', 'Log a meal'];
   } else {
-    // how far through the day's calories you are sets how much protein and fibre you'd expect by now
     const share = Math.min(1, t.kcal / target), pT = proteinTarget(), fT = 30;
-    const lowP = share >= 0.2 && t.protein < pT * share * 0.8, lowF = share >= 0.2 && t.fibre < fT * share * 0.8;
-    const pace = `with ${r0(share * 100)}% of today's calories eaten`;
-    if (lowP && lowF) out.main = `You're behind on protein (${r0(t.protein)}g of ${pT}g) and fibre (${r0(t.fibre)}g of ${fT}g) ${pace}. Bulk up your next meal with ${TIP_FOODS.both}.`;
-    else if (lowP) out.main = `You're behind on protein: ${r0(t.protein)}g of your ${pT}g ${pace}. Add ${TIP_FOODS.protein} to your next meal. Protein keeps you fuller for longer.`;
-    else if (lowF) out.main = `You're behind on fibre: ${r0(t.fibre)}g of 30g ${pace}. Add ${TIP_FOODS.fibre}. Fibre fills you up and helps keep cholesterol down.`;
-    else if (t.sat > RI.sat) out.main = `Saturated fat is at ${r0(t.sat)}g, over the 20g daily reference. For the rest of today, go for beans, veg, oats and lower-fat dairy over cheese, butter and pastry.`;
-    else {
-      const tip = tipOfDay(); out.src = tip;
-      out.main = (share >= 0.2 ? `On track: ${r0(target - t.kcal).toLocaleString('en-GB')} kcal left, with protein and fibre keeping pace. ` : '') + tip.lead + ' ' + tip.text;
+    // main meals still to come today, so protein can be spread over them
+    const left = MEAL_DUE.filter(([ty, due]) => !has(ty) && h < due).length;
+    if (h < 14) {
+      // early in the day: no "behind" warnings, just a plan for the rest of it
+      const pNext = left ? Math.round(Math.max(0, pT - t.protein) / left / 5) * 5 : 0;
+      out.main = `Good start: ${r0(t.kcal).toLocaleString('en-GB')} kcal and ${r0(t.protein)}g protein so far, ${r0(target - t.kcal).toLocaleString('en-GB')} kcal left.` +
+        (pNext >= 15 ? ` Aim for about ${pNext}g protein at ${left > 1 ? 'each of your next ' + left + ' meals' : 'your next meal'} to reach ${pT}g, with plenty of veg or beans for fibre.` : ' Protein is going well.');
+    } else {
+      // how far through the day's calories you are sets how much protein and fibre you'd expect by now
+      const lowP = share >= 0.2 && t.protein < pT * share * 0.8, lowF = share >= 0.2 && t.fibre < fT * share * 0.8;
+      const next = h >= 20 ? 'an evening snack' : 'your next meal';
+      const pFoods = h >= 20 ? 'skyr, Greek yoghurt, cottage cheese or a boiled egg' : TIP_FOODS.protein;
+      if (lowP && lowF) out.main = `You're a bit behind on protein (${r0(t.protein)}g of ${pT}g) and fibre (${r0(t.fibre)}g of ${fT}g) for this point in the day. Bulk up ${next} with ${TIP_FOODS.both}.`;
+      else if (lowP) out.main = `You're a bit behind on protein: ${r0(t.protein)}g of your ${pT}g so far. Add ${pFoods} to ${next}. Protein keeps you fuller for longer.`;
+      else if (lowF) out.main = `You're a bit behind on fibre: ${r0(t.fibre)}g of 30g so far. Add ${TIP_FOODS.fibre} to ${next}. Fibre fills you up and helps keep cholesterol down.`;
+      else if (t.sat > RI.sat) out.main = `Saturated fat is at ${r0(t.sat)}g, over the 20g daily reference. For the rest of today, go for beans, veg, oats and lower-fat dairy over cheese, butter and pastry.`;
+      else {
+        const tip = tipOfDay(); out.src = tip;
+        out.main = `On track: ${r0(target - t.kcal).toLocaleString('en-GB')} kcal left, with protein and fibre keeping pace. ` + tip.lead + ' ' + tip.text;
+      }
     }
   }
   const wd = daysSince((weightList().slice(-1)[0] || {}).date);
